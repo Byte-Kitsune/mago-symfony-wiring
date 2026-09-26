@@ -1,0 +1,22 @@
+<?php
+
+declare(strict_types=1);
+
+namespace ByteKitsune\MagoSymfonyWiring;
+
+use ByteKitsune\MagoSymfonyWiring\Analyzer\WiringPlugin;
+use Mago\Sdk\Extension;
+
+final class SymfonyWiringExtension
+{
+    /** @param list<string> $serviceFiles Explicit, ordered checkout-relative shared/dev files. */
+    public static function create(string $projectRoot, array $serviceFiles): Extension
+    {
+        return new Extension(
+            identifier: 'byte-kitsune/symfony-wiring',
+            name: 'Symfony service wiring',
+            version: '0.1.0',
+            analyzerPlugins: [new WiringPlugin(new ServiceConfigLoader($projectRoot, $serviceFiles))],
+        );
+    }
+}

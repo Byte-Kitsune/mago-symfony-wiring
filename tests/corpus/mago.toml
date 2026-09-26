@@ -1,0 +1,9 @@
+version = "1"
+php-version = "8.2"
+
+[source]
+paths = ["src"]
+
+[extension-hosts.php]
+command = ["php", "worker.php"]
+workers = 1

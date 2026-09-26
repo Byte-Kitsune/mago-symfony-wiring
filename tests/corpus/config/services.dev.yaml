@@ -1,0 +1,3 @@
+services:
+  App\DevFormatter: { class: App\DevFormatter }
+  App\FormatterInterface $textFormatter: '@App\DevFormatter'
