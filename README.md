@@ -1,6 +1,6 @@
 # Mago Symfony Wiring
 
-**Beta: 0.1.0-beta.2.** The configuration subset and public API may change
+**Beta: 0.1.0-beta.3.** The configuration subset and public API may change
 before a stable release; pin the exact prerelease version in consumers.
 
 A Mago Analyzer Plugin that checks literal Symfony service wiring for the dev
@@ -27,6 +27,10 @@ in `mago.toml`. The first release resolves explicit service IDs, aliases,
 constructor arguments, and `#[Target]` named aliases; it reports unproven
 targets without claiming a complete Symfony container model. The public
 `ServiceConfigLoader`/`ServiceMap` API also supports other analyzer plugins.
+`ServiceMap::serviceClassBindings()` exposes exact configured service IDs and
+aliases with a declared class; it returns no bindings when any selected service
+file is incomplete. These are literal dev-configuration facts, not a compiled
+container or a proof about dynamic service locators.
 
 For literal dev bindings, the extension also contributes constructor-to-concrete
 class references to Mago's symbol graph. A named `#[Target]` uses its effective

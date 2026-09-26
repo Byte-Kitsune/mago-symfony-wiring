@@ -62,4 +62,18 @@ final class ServiceMap
         ksort($bindings);
         return $bindings;
     }
+
+    /** @return array<string, string> Exact service ID (including aliases) to declared class. */
+    public function serviceClassBindings(): array
+    {
+        if ($this->incomplete !== []) return [];
+        $bindings = [];
+        foreach (array_keys($this->services + $this->aliases) as $name) {
+            $id = $this->resolveId($name);
+            $class = $id === null ? null : $this->services[$id]['class'];
+            if ($class !== null) $bindings[$name] = $class;
+        }
+        ksort($bindings);
+        return $bindings;
+    }
 }
