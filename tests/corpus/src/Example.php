@@ -16,7 +16,11 @@ namespace App {
     final class GoodService {
         public function __construct(#[Target('textFormatter')] private FormatterInterface $formatter) {}
     }
+    final class DefaultService {
+        public function __construct(private FormatterInterface $formatter) {}
+    }
     final class BadService {
         public function __construct(#[Target('missingFormatter')] private FormatterInterface $formatter) {}
     }
+    final class UnusedService {}
 }

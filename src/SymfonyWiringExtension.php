@@ -15,7 +15,7 @@ final class SymfonyWiringExtension
         return new Extension(
             identifier: 'byte-kitsune/symfony-wiring',
             name: 'Symfony service wiring',
-            version: '0.1.0',
+            version: '0.1.0-beta.2',
             analyzerPlugins: [new WiringPlugin(new ServiceConfigLoader($projectRoot, $serviceFiles))],
         );
     }

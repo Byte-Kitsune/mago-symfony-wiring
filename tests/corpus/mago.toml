@@ -4,6 +4,9 @@ php-version = "8.2"
 [source]
 paths = ["src"]
 
+[analyzer]
+find-unused-definitions = true
+
 [extension-hosts.php]
 command = ["php", "worker.php"]
 workers = 1

@@ -20,6 +20,7 @@ final class WiringPlugin implements Plugin
 
     public function register(PluginRegistry $registry): void
     {
+        $registry->registerAfterFileAnalysisHook(new AutowiringReferenceHook($this->loader));
         $registry->registerAfterAnalysisHook(new TargetWiringHook($this->loader));
     }
 }
