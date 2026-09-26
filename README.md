@@ -1,5 +1,8 @@
 # Mago Symfony Wiring
 
+**Beta: 0.1.0-beta.1.** The configuration subset and public API may change
+before a stable release; pin the exact prerelease version in consumers.
+
 A Mago Analyzer Plugin that checks literal Symfony service wiring for the dev
 environment. It never boots Symfony or evaluates PHP configuration. It accepts
 only an explicit ordered list of shared and dev service files; test/prod files
