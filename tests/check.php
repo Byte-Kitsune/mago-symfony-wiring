@@ -16,10 +16,20 @@ if ($map->resolveTarget('App\\FormatterInterface', 'missingFormatter') !== null)
 if (($map->classBindings()['App\\FormatterInterface $textFormatter'] ?? null) !== 'App\\DevFormatter') {
     throw new RuntimeException('Class bindings did not preserve named dev alias.');
 }
+if (($map->serviceClassBindings()['App\\FormatterInterface $textFormatter'] ?? null) !== 'App\\DevFormatter'
+    || ($map->serviceClassBindings()['App\\FormatterInterface'] ?? null) !== 'App\\Formatter') {
+    throw new RuntimeException('Service IDs did not resolve through shared and dev aliases.');
+}
 $phpMap = (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/services.php']))->load();
 if ($phpMap->resolveTarget('App\\FormatterInterface', 'textFormatter') !== 'formatter.named') {
     throw new RuntimeException('PHP Configurator alias was not resolved.');
 }
+if (($phpMap->serviceClassBindings()['formatter.named'] ?? null) !== 'App\\DevFormatter'
+    || ($phpMap->serviceClassBindings()['App\\FormatterInterface $textFormatter'] ?? null) !== 'App\\DevFormatter') {
+    throw new RuntimeException('PHP service ID alias was not resolved to a class.');
+}
+$incomplete = (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/missing.yaml']))->load();
+if ($incomplete->serviceClassBindings() !== []) throw new RuntimeException('Incomplete service files supplied class bindings.');
 try {
     new ServiceConfigLoader(__DIR__ . '/corpus', ['config/services.test.yaml']);
     (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/services.test.yaml']))->load();
