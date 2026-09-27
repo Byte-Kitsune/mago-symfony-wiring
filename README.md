@@ -1,37 +1,92 @@
 # Mago Symfony Wiring
 
-**Beta: 0.1.0-beta.2.** The configuration subset and public API may change
-before a stable release; pin the exact prerelease version in consumers.
+Static evidence for Symfony service wiring in [Mago](https://mago.carthage.software/1.50.0/en/). This beta is an **Analyzer** plugin: it checks constructor `#[Target]` bindings and adds proven autowiring references to Mago's symbol graph. It parses configuration; it never boots Symfony or executes PHP service files.
 
-A Mago Analyzer Plugin that checks literal Symfony service wiring for the dev
-environment. It never boots Symfony or evaluates PHP configuration. It accepts
-only an explicit ordered list of shared and dev service files; test/prod files
-are rejected. Unsupported configuration is recorded as incomplete evidence.
+## Install and run
 
-Install `byte-kitsune/mago-symfony-wiring` with `carthage-software/mago` and
-register the package factory in the application's `.mago/extensions.php`:
+Requires PHP 8.2+ and Mago 1.50. Pin the beta in your project:
+
+```sh
+composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.3
+```
+
+Add an extension host to `mago.toml`:
+
+```toml
+[extension-hosts.php]
+command = ["php", ".mago/extensions.php"]
+```
+
+Create `.mago/extensions.php`:
 
 ```php
+<?php
+
 use ByteKitsune\MagoSymfonyWiring\SymfonyWiringExtension;
 use Mago\Sdk\Worker;
 
-require dirname(__DIR__) . '/vendor/autoload.php';
-(new Worker(SymfonyWiringExtension::create(dirname(__DIR__), [
+$root = dirname(__DIR__);
+require $root . '/vendor/autoload.php';
+
+(new Worker(SymfonyWiringExtension::create($root, [
     'config/services.yaml',
     'config/services.dev.yaml',
 ])))->run();
 ```
 
-Then set `[extension-hosts.php] command = ["php", ".mago/extensions.php"]`
-in `mago.toml`. The first release resolves explicit service IDs, aliases,
-constructor arguments, and `#[Target]` named aliases; it reports unproven
-targets without claiming a complete Symfony container model. The public
-`ServiceConfigLoader`/`ServiceMap` API also supports other analyzer plugins.
+Run `vendor/bin/mago analyze`. List the service files explicitly, in merge order: shared files first, then dev overrides. Paths are relative to the project root. `config/services/dev/*.yaml` files can be listed individually; test, prod and staging paths are rejected. The worker is trusted configuration, so review its file list alongside code changes.
 
-For literal dev bindings, the extension also contributes constructor-to-concrete
-class references to Mago's symbol graph. A named `#[Target]` uses its effective
-dev alias; a plain typed parameter uses its default alias. Missing, ambiguous,
-dynamic, or unsupported configuration adds no reference. This improves Mago's
-unused-symbol evidence without suppressing native diagnostics. Mago's current
-`find-unused-definitions` check targets private definitions, so a public service
-class is not automatically a dead-code warning even without this extension.
+## Supported configuration
+
+Each selected YAML or PHP file needs a `services` node. The parser supports explicit service classes, aliases, arguments and `autowire`; `_defaults` supports `autowire`. YAML `when@dev.services` overrides the file's shared entries. PHP files must return a literal `App::config(['services' => ...])` expression; supported literals include strings, booleans, `ClassName::class`, arrays and `service('id')`. Dynamic expressions are incomplete.
+
+For example, this YAML binds a named target and a default interface:
+
+```yaml
+services:
+  app.formatter: { class: App\Text\Formatter }
+  App\Text\FormatterInterface: '@app.formatter'
+  App\Text\FormatterInterface $textFormatter: '@app.formatter'
+```
+
+```php
+use App\Text\FormatterInterface;
+use Symfony\Component\DependencyInjection\Attribute\Target;
+
+final class ReportController
+{
+    public function __construct(
+        #[Target('textFormatter')] private FormatterInterface $formatter,
+    ) {}
+}
+```
+
+`#[Target]` without a proven matching dev binding produces the `unresolved-target` warning. A missing, linked, oversized or unsupported service file makes the map incomplete; the plugin does not guess bindings from partial configuration.
+
+## Use the service map in other plugins
+
+`ServiceConfigLoader` returns a `ServiceMap` with `incomplete` reasons and SHA-256 `hashes` for selected files. `classBindings()` maps typed/default or named targets to declared classes. `serviceClassBindings()` maps exact IDs and aliases to declared classes. Both return no bindings when the selected map is incomplete:
+
+```php
+use ByteKitsune\MagoSymfonyWiring\ServiceConfigLoader;
+
+$map = (new ServiceConfigLoader($root, [
+    'config/services.yaml',
+    'config/services.dev.yaml',
+]))->load();
+
+$typeBindings = $map->classBindings();
+$serviceBindings = $map->serviceClassBindings();
+$complete = $map->incomplete === [];
+```
+
+These are literal dev-configuration facts, not a compiled-container model. Proven constructor bindings add references to Mago's symbol graph, which can improve unused-definition evidence. The plugin does not suppress Mago's native dead-code diagnostics or claim that every runtime service is reachable.
+
+## Develop
+
+```sh
+composer install
+sh tests/smoke.sh
+```
+
+The [fixture](tests/corpus) exercises YAML, PHP, dev overrides, `#[Target]` and incomplete bindings. Licensed under [MIT](LICENSE).
