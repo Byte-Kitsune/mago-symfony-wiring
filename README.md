@@ -7,7 +7,7 @@ Static evidence for Symfony service wiring in [Mago](https://mago.carthage.softw
 Requires PHP 8.2+ and Mago 1.50. Pin the beta in your project:
 
 ```sh
-composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.3
+composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.4
 ```
 
 Add an extension host to `mago.toml`:
@@ -62,6 +62,8 @@ final class ReportController
 ```
 
 `#[Target]` without a proven matching dev binding produces the `unresolved-target` warning. A missing, linked, oversized or unsupported service file makes the map incomplete; the plugin does not guess bindings from partial configuration.
+
+The Analyzer emits one `analysis-attestation` note after a PHP source run. Its bounded `extension-attestation` payload records version, `service_wiring` capability, source-file count and whether all selected service files were read completely. A gate that depends on Symfony wiring should require this note even when there are no warnings.
 
 ## Use the service map in other plugins
 

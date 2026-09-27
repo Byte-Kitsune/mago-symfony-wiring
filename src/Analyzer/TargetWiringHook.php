@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ByteKitsune\MagoSymfonyWiring\Analyzer;
 
 use ByteKitsune\MagoSymfonyWiring\ServiceConfigLoader;
+use ByteKitsune\MagoSymfonyWiring\SymfonyWiringExtension;
 use Mago\Sdk\Analyzer\AfterAnalysisContext;
 use Mago\Sdk\Analyzer\AfterAnalysisHook;
 use Mago\Sdk\Reporting\Issue;
@@ -26,10 +27,14 @@ final class TargetWiringHook implements AfterAnalysisHook
         $map = $this->loader->load();
         $parser = (new ParserFactory())->createForNewestSupportedVersion();
         $finder = new NodeFinder();
+        $sourceFiles = 0;
+        $firstSource = null;
         foreach ($context->analysis->files as $file) {
             $context->cancellation->throwIfCancelled();
             if (!str_ends_with($file->file, '.php')) continue;
             $source = $file->getSourceFile();
+            $firstSource ??= $source;
+            $sourceFiles++;
             try {
                 $statements = $parser->parse($source->contents);
                 if ($statements === null) continue;
@@ -59,6 +64,19 @@ final class TargetWiringHook implements AfterAnalysisHook
                     }
                 }
             }
+        }
+        if ($firstSource !== null) {
+            $attestation = [
+                'schema_version' => '1',
+                'extension' => 'byte-kitsune/symfony-wiring',
+                'version' => SymfonyWiringExtension::VERSION,
+                'capability' => 'service_wiring',
+                'complete' => $map->incomplete === [],
+                'source_files' => $sourceFiles,
+            ];
+            $note = 'extension-attestation: ' . json_encode($attestation, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            $end = $firstSource->contents === '' ? 0 : 1;
+            $context->report(Level::Note, 'analysis-attestation', Issue::at('Symfony service wiring analysis completed.', new SourceLocation($firstSource->path, new Span(0, $end)))->withNote($note));
         }
     }
 }
