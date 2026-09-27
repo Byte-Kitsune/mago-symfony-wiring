@@ -2,6 +2,8 @@
 
 Static evidence for Symfony service wiring in [Mago](https://mago.carthage.software/1.50.0/en/). This beta is an **Analyzer** plugin: it checks constructor `#[Target]` bindings and adds proven autowiring references to Mago's symbol graph. It parses configuration; it never boots Symfony or executes PHP service files.
 
+Start with the [small runnable example](examples/README.md) to see why a dev service override and a named `#[Target]` need explicit wiring evidence.
+
 ## Install and run
 
 Requires PHP 8.2+ and Mago 1.50. Pin the beta in your project:
