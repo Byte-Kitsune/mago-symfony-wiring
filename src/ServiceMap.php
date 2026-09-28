@@ -38,7 +38,12 @@ final class ServiceMap
 
     public function resolveTarget(string $type, string $target): ?string
     {
-        return $this->resolveId(ltrim($type, '\\') . ' $' . ltrim($target, '$'));
+        $type = ltrim($type, '\\');
+        $target = ltrim($target, '$');
+        $parsed = lcfirst(str_replace(' ', '', ucwords((string) preg_replace('/[^a-zA-Z0-9\x7f-\xff]++/', ' ', $target))));
+        if (!preg_match('/^[a-zA-Z_\x7f-\xff]/', $parsed)) return null;
+        $name = preg_match('/^[a-zA-Z0-9_\x7f-\xff]++$/', $target) ? $target : $parsed;
+        return $this->resolveId($type . ' $' . $name);
     }
 
     public function resolveType(string $type): ?string

@@ -117,7 +117,10 @@ final class ServiceConfigLoader
         if (!is_array($document)) {
             throw new \UnexpectedValueException('Expected YAML mapping.');
         }
-        $services = $document['services'] ?? [];
+        if (!array_key_exists('services', $document)) {
+            throw new \UnexpectedValueException('Missing services node.');
+        }
+        $services = $document['services'];
         if (!is_array($services)) {
             throw new \UnexpectedValueException('Expected services mapping.');
         }

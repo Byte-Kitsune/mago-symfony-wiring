@@ -10,6 +10,9 @@ $map = (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/services.yaml', 'c
 if ($map->resolveTarget('App\\FormatterInterface', 'textFormatter') !== 'App\\DevFormatter') {
     throw new RuntimeException('Dev override was not selected.');
 }
+if ($map->resolveTarget('App\\FormatterInterface', 'text.formatter') !== 'App\\DevFormatter') {
+    throw new RuntimeException('Symfony Target name normalization was not applied.');
+}
 if ($map->resolveTarget('App\\FormatterInterface', 'missingFormatter') !== null) {
     throw new RuntimeException('Missing alias resolved.');
 }
@@ -30,6 +33,8 @@ if (($phpMap->serviceClassBindings()['formatter.named'] ?? null) !== 'App\\DevFo
 }
 $incomplete = (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/missing.yaml']))->load();
 if ($incomplete->serviceClassBindings() !== []) throw new RuntimeException('Incomplete service files supplied class bindings.');
+$noServices = (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/no-services.yaml']))->load();
+if ($noServices->incomplete === []) throw new RuntimeException('Missing services node was accepted.');
 try {
     new ServiceConfigLoader(__DIR__ . '/corpus', ['config/services.test.yaml']);
     (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/services.test.yaml']))->load();

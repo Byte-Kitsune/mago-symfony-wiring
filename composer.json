@@ -12,5 +12,15 @@
   "autoload": {
     "psr-4": { "ByteKitsune\\MagoSymfonyWiring\\": "src/" }
   },
-  "config": { "allow-plugins": false, "sort-packages": true }
+  "config": {
+    "allow-plugins": false,
+    "sort-packages": true,
+    "platform": {
+      "php": "8.2.0"
+    }
+  },
+  "require-dev": {
+    "symfony/config": "^7.4",
+    "symfony/dependency-injection": "^7.4"
+  }
 }
