@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Symfony\Component\DependencyInjection\Attribute {
     #[\Attribute(\Attribute::TARGET_PARAMETER)]
     final class Target { public function __construct(public string $name) {} }
+    #[\Attribute(\Attribute::TARGET_CLASS)]
+    final class Exclude {}
 }
 
 namespace App {

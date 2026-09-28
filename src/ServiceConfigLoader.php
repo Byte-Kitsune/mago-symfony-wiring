@@ -14,16 +14,19 @@ use Symfony\Component\Yaml\Yaml;
 /** Reads only explicit shared/dev service files; PHP configuration is parsed, never run. */
 final class ServiceConfigLoader
 {
+    private ?ServiceMap $cached = null;
+
     /** @param list<string> $files Ordered checkout-relative shared/dev service files. */
     public function __construct(private readonly string $root, private readonly array $files) {}
 
     public function load(): ServiceMap
     {
+        if ($this->cached !== null) return $this->cached;
         $root = realpath($this->root);
         if ($root === false) {
             throw new \InvalidArgumentException('Service configuration root does not exist.');
         }
-        $services = $aliases = $hashes = [];
+        $services = $aliases = $hashes = $resources = [];
         $incomplete = [];
         if (count($this->files) > 64) {
             throw new \InvalidArgumentException('At most 64 service files are supported.');
@@ -55,7 +58,8 @@ final class ServiceConfigLoader
                 continue;
             }
             $defaults = $entries['_defaults'] ?? [];
-            if (!is_array($defaults) || array_diff(array_keys($defaults), ['autowire']) !== [] || !is_bool($defaults['autowire'] ?? true)) {
+            if (!is_array($defaults) || array_diff(array_keys($defaults), ['autowire', 'autoconfigure']) !== []
+                || !is_bool($defaults['autowire'] ?? true) || !is_bool($defaults['autoconfigure'] ?? true)) {
                 $incomplete[] = $file . ': unsupported _defaults';
                 $defaults = [];
             }
@@ -63,6 +67,12 @@ final class ServiceConfigLoader
             foreach ($entries as $id => $entry) {
                 if (!is_string($id) || !is_array($entry) && !is_string($entry)) {
                     $incomplete[] = $file . ': unsupported service entry';
+                    continue;
+                }
+                if (is_array($entry) && array_key_exists('resource', $entry)) {
+                    $resource = $this->resource($root, $file, $id, $entry, $defaults);
+                    if ($resource === null) $incomplete[] = $file . ': unsupported resource ' . $id;
+                    else $resources[] = $resource;
                     continue;
                 }
                 if (is_string($entry)) {
@@ -93,10 +103,146 @@ final class ServiceConfigLoader
                 unset($aliases[$id]);
             }
         }
+        $this->materializeResourceAliases($root, $resources, $services, $aliases, $hashes, $incomplete);
         ksort($services);
         ksort($aliases);
         ksort($hashes);
-        return new ServiceMap($services, $aliases, $incomplete, $hashes);
+        return $this->cached = new ServiceMap($services, $aliases, $incomplete, $hashes);
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     * @param array<string, mixed> $defaults
+     * @return array{prefix: string, directory: string, excludes: list<string>, origin: string}|null
+     */
+    private function resource(string $root, string $file, string $prefix, array $entry, array $defaults): ?array
+    {
+        if (!str_ends_with($prefix, '\\') || array_diff(array_keys($entry), ['resource', 'exclude', 'autowire', 'autoconfigure']) !== []) return null;
+        if (($entry['autowire'] ?? $defaults['autowire'] ?? true) !== true || !is_bool($entry['autoconfigure'] ?? true)) return null;
+        $path = $entry['resource'];
+        if (!is_string($path) || $path === '' || str_starts_with($path, '/') || preg_match('/[\x00*?\[\]{}]/', $path)) return null;
+        $directory = realpath($root . '/' . dirname($file) . '/' . $path);
+        if ($directory === false || !is_dir($directory) || !str_starts_with($directory . '/', $root . '/')) return null;
+        $excludeEntries = $entry['exclude'] ?? [];
+        if (is_string($excludeEntries)) $excludeEntries = [$excludeEntries];
+        if (!is_array($excludeEntries) || !array_is_list($excludeEntries)) return null;
+        $excludes = [];
+        foreach ($excludeEntries as $exclude) {
+            if (!is_string($exclude) || $exclude === '' || str_starts_with($exclude, '/') || preg_match('/[\x00*?\[\]]/', $exclude)) return null;
+            $expanded = $this->expandBraces($exclude);
+            if ($expanded === null) return null;
+            foreach ($expanded as $part) {
+                $path = $this->normalizePath($root . '/' . dirname($file) . '/' . $part);
+                if (!str_starts_with($path, $root . '/')) return null;
+                $real = realpath($path);
+                if ($real !== false && $real !== $path) return null;
+                $excludes[] = $path;
+                if (count($excludes) > 128) return null;
+            }
+        }
+        return ['prefix' => $prefix, 'directory' => $directory, 'excludes' => $excludes, 'origin' => $file];
+    }
+
+    /** @return list<string>|null */
+    private function expandBraces(string $path): ?array
+    {
+        if (!str_contains($path, '{') && !str_contains($path, '}')) return [$path];
+        if (!preg_match('/^(.*?)\{([^{}]+)\}(.*)$/D', $path, $match)) return null;
+        $result = [];
+        foreach (explode(',', $match[2]) as $option) {
+            if ($option === '') return null;
+            $expanded = $this->expandBraces($match[1] . $option . $match[3]);
+            if ($expanded === null) return null;
+            array_push($result, ...$expanded);
+            if (count($result) > 128) return null;
+        }
+        return $result;
+    }
+
+    private function normalizePath(string $path): string
+    {
+        $parts = [];
+        foreach (explode('/', $path) as $part) {
+            if ($part === '' || $part === '.') continue;
+            if ($part === '..') array_pop($parts);
+            else $parts[] = $part;
+        }
+        return '/' . implode('/', $parts);
+    }
+
+    /**
+     * @param list<array{prefix: string, directory: string, excludes: list<string>, origin: string}> $resources
+     * @param array<string, array{class: ?string, arguments: array<int|string, mixed>, autowire: bool, origin: string}> $services
+     * @param array<string, string> $aliases
+     * @param array<string, string> $hashes
+     * @param list<string> $incomplete
+     */
+    private function materializeResourceAliases(string $root, array $resources, array &$services, array $aliases, array &$hashes, array &$incomplete): void
+    {
+        if (count($aliases) > 4096) {
+            $incomplete[] = 'resource alias count exceeds 4096';
+            return;
+        }
+        foreach ($aliases as $alias => $target) {
+            $seen = [$alias => true];
+            while (isset($aliases[$target]) && !isset($seen[$target])) {
+                $seen[$target] = true;
+                $target = $aliases[$target];
+            }
+            if (isset($services[$target]) || isset($seen[$target])) continue;
+            $matches = [];
+            foreach ($resources as $resource) if (str_starts_with($target, $resource['prefix'])) $matches[] = $resource;
+            if ($matches === []) continue;
+            if (count($matches) !== 1) {
+                $incomplete[] = 'ambiguous resource for ' . $target;
+                continue;
+            }
+            $resource = $matches[0];
+            $relative = substr($target, strlen($resource['prefix']));
+            if ($relative === '' || !preg_match('/^[A-Za-z_\\\\][A-Za-z0-9_\\\\]*$/D', $relative)) {
+                $incomplete[] = 'invalid resource class ' . $target;
+                continue;
+            }
+            $path = $resource['directory'] . '/' . str_replace('\\', '/', $relative) . '.php';
+            $real = realpath($path);
+            $excluded = false;
+            foreach ($resource['excludes'] as $exclude) {
+                if ($path === $exclude || str_starts_with($path, rtrim($exclude, '/') . '/')) $excluded = true;
+            }
+            $size = is_file($path) ? filesize($path) : false;
+            if ($excluded || $real !== $path || $size === false || $size > 1_048_576) {
+                $incomplete[] = 'unverified resource class ' . $target;
+                continue;
+            }
+            $bytes = file_get_contents($path);
+            if ($bytes === false || !$this->declaresClass($bytes, $target)) {
+                $incomplete[] = 'unverified resource class ' . $target;
+                continue;
+            }
+            $hashes[substr($path, strlen($root) + 1)] = hash('sha256', $bytes);
+            $services[$target] = ['class' => $target, 'arguments' => [], 'autowire' => true, 'origin' => $resource['origin']];
+        }
+    }
+
+    private function declaresClass(string $bytes, string $className): bool
+    {
+        try {
+            $statements = (new ParserFactory())->createForNewestSupportedVersion()->parse($bytes);
+            if ($statements === null) return false;
+            $statements = (new NodeTraverser(new NameResolver()))->traverse($statements);
+            foreach ((new NodeFinder())->findInstanceOf($statements, Node\Stmt\Class_::class) as $class) {
+                if ($class->name === null || strcasecmp($class->namespacedName?->toString() ?? '', $className) !== 0) continue;
+                if ($class->isAbstract()) return false;
+                foreach ($class->attrGroups as $group) foreach ($group->attrs as $attribute) {
+                    $name = ltrim(($attribute->name->getAttribute('resolvedName') ?? $attribute->name)->toString(), '\\');
+                    if (in_array($name, ['Symfony\\Component\\DependencyInjection\\Attribute\\Exclude', 'Symfony\\Component\\DependencyInjection\\Attribute\\When'], true)) return false;
+                }
+                return true;
+            }
+        } catch (\Throwable) {
+            return false;
+        }
+        return false;
     }
 
     private static function allowedPath(string $path): bool
