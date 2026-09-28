@@ -1,0 +1,6 @@
+services:
+  _defaults: { autowire: true, autoconfigure: true }
+  ResourceFixture\:
+    resource: '../src/'
+    exclude: '../src/{Unused,Missing.php}'
+  ResourceFixture\FormatterInterface: '@ResourceFixture\Formatter'

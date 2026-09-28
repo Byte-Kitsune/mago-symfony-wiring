@@ -12,7 +12,7 @@ Start with the [small runnable example](examples/README.md) to see why a dev ser
 Requires PHP 8.2+ and Mago 1.50. Pin the beta in your project:
 
 ```sh
-composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.5
+composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.6
 ```
 
 Add an extension host to `mago.toml`:
@@ -43,7 +43,9 @@ Run `vendor/bin/mago analyze`. List the service files explicitly, in merge order
 
 ## Supported configuration
 
-Each selected YAML or PHP file needs a `services` node. The parser supports explicit service classes, aliases, arguments and `autowire`; `_defaults` supports `autowire`. YAML `when@dev.services` overrides the file's shared entries. PHP files must return a literal `App::config(['services' => ...])` expression; supported literals include strings, booleans, `ClassName::class`, arrays and `service('id')`. Dynamic expressions are incomplete.
+Each selected YAML or PHP file needs a `services` node. The parser supports explicit service classes, aliases, arguments and `autowire`; `_defaults` also accepts boolean `autoconfigure`. YAML `when@dev.services` overrides the file's shared entries. PHP files must return a literal `App::config(['services' => ...])` expression; supported literals include strings, booleans, `ClassName::class`, arrays and `service('id')`. Dynamic expressions are incomplete.
+
+A simple autowired namespace `resource` directory can back an explicit alias to a class ID. The loader verifies that class's source file, applies literal path and brace-list exclusions, rejects abstract or attributed exclusions, and hashes the file. It resolves only classes reached by explicit aliases; it does not enumerate every resource service or infer Symfony's automatic interface aliases. Unsupported resource globs and service imports keep the map incomplete. If your application relies on an automatic interface alias, add an explicit alias for analysis or use a separately verified dev-container binding. The [Symfony autowiring guide](https://symfony.com/doc/current/service_container/autowiring.html) explains when Symfony creates an automatic alias.
 
 For example, this YAML binds a named target and a default interface:
 
@@ -72,7 +74,7 @@ The Analyzer emits one `analysis-attestation` note after a PHP source run. Its b
 
 ## Use the service map in other plugins
 
-`ServiceConfigLoader` returns a `ServiceMap` with `incomplete` reasons and SHA-256 `hashes` for selected files. `classBindings()` maps typed/default or named targets to declared classes. `serviceClassBindings()` maps exact IDs and aliases to declared classes. Both return no bindings when the selected map is incomplete:
+`ServiceConfigLoader` returns a `ServiceMap` with `incomplete` reasons and SHA-256 `hashes` for selected configuration and resource-target files. It reads once per loader instance; create a new instance for a new analysis run. `classBindings()` maps typed/default or named targets to declared classes. `serviceClassBindings()` maps exact selected IDs and aliases to declared classes. Both return no bindings when the selected map is incomplete:
 
 ```php
 use ByteKitsune\MagoSymfonyWiring\ServiceConfigLoader;

@@ -35,6 +35,19 @@ $incomplete = (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/missing.yam
 if ($incomplete->serviceClassBindings() !== []) throw new RuntimeException('Incomplete service files supplied class bindings.');
 $noServices = (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/no-services.yaml']))->load();
 if ($noServices->incomplete === []) throw new RuntimeException('Missing services node was accepted.');
+$resource = (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/services.resource.yaml']))->load();
+if ($resource->incomplete !== [] || ($resource->classBindings()['App\\FormatterInterface'] ?? null) !== 'App\\ResourceService'
+    || !isset($resource->hashes['src/ResourceService.php'])) {
+    throw new RuntimeException('Resource-backed explicit alias was not proven.');
+}
+$excluded = (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/services.excluded.yaml']))->load();
+if ($excluded->incomplete === [] || $excluded->classBindings() !== []) {
+    throw new RuntimeException('Excluded resource class was accepted.');
+}
+$attributeExcluded = (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/services.attribute-excluded.yaml']))->load();
+if ($attributeExcluded->incomplete === [] || $attributeExcluded->classBindings() !== []) {
+    throw new RuntimeException('Attribute-excluded resource class was accepted.');
+}
 try {
     new ServiceConfigLoader(__DIR__ . '/corpus', ['config/services.test.yaml']);
     (new ServiceConfigLoader(__DIR__ . '/corpus', ['config/services.test.yaml']))->load();

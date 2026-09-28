@@ -1,0 +1,5 @@
+services:
+  _defaults: { autowire: true, autoconfigure: true }
+  App\:
+    resource: '../src/'
+  App\FormatterInterface: '@App\ExcludedByAttribute'

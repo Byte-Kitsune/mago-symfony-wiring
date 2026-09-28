@@ -1,0 +1,6 @@
+services:
+  _defaults: { autowire: true, autoconfigure: true }
+  App\:
+    resource: '../src/'
+    exclude: '../src/{ExcludedService.php,MissingService.php}'
+  App\FormatterInterface: '@App\ResourceService'
