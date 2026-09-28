@@ -12,7 +12,7 @@ Start with the [small runnable example](examples/README.md) to see why a dev ser
 Requires PHP 8.2+ and Mago 1.50. Pin the beta in your project:
 
 ```sh
-composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.4
+composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.5
 ```
 
 Add an extension host to `mago.toml`:
@@ -89,6 +89,23 @@ $complete = $map->incomplete === [];
 
 These are literal dev-configuration facts, not a compiled-container model. Proven constructor bindings add references to Mago's symbol graph, which can improve unused-definition evidence. The plugin does not suppress Mago's native dead-code diagnostics or claim that every runtime service is reachable.
 
+## Compare with the Symfony dev container
+
+For a selected-wiring parity gate, run Symfony's `debug:container` separately in a trusted dev environment and pipe its JSON directly to the comparison command. Use the same ordered service-file list as the Mago extension host:
+
+```sh
+set -o pipefail
+APP_ENV=dev APP_DEBUG=1 php bin/console debug:container --env=dev --format=json --show-hidden --no-interaction |
+  php vendor/byte-kitsune/mago-symfony-wiring/bin/compare-container.php \
+    --root=. \
+    --service-file=config/services.yaml \
+    --service-file=config/services.dev.yaml
+```
+
+The command never starts Symfony itself. It checks that every service ID and alias selected by the static map resolves to the same service ID and class in Symfony's dev debug container. Its one-line JSON report contains `status` (`pass`, `mismatch`, or `incomplete`), `scope`, `checked`, `mismatch_count`, `truncated`, up to 1,000 `mismatches`, and input hashes when available. Exit codes are 0, 1, and 2 respectively. Treat anything other than `pass` as a failed gate. The raw Symfony JSON can contain application configuration values; piping it avoids saving that full output to a file.
+
+This proves parity only for **selected service IDs** and the exact inputs used for that comparison. Symfony's JSON does not attest its environment or Git revision, so the trusted caller must run the command as shown against the intended dev checkout. The result does not prove that every Symfony service was selected or that runtime objects behave identically. Imports, compiler passes, environment-sensitive code, and other dynamic wiring remain outside the static parser; a mismatch exposes one of those differences instead of silently claiming parity. The Mago worker continues to parse source without booting the application.
+
 ## Develop
 
 ```sh
@@ -96,4 +113,4 @@ composer install
 sh tests/smoke.sh
 ```
 
-The [fixture](tests/corpus) exercises YAML, PHP, dev overrides, `#[Target]` and incomplete bindings. Licensed under [MIT](LICENSE).
+The [fixture](tests/corpus) exercises YAML, PHP, dev overrides, `#[Target]` and incomplete bindings. A second [fixture](tests/parity-fixture) compiles a real Symfony container and checks matching and drifting bindings. Licensed under [MIT](LICENSE).

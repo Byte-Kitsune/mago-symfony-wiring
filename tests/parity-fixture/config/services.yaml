@@ -1,0 +1,7 @@
+services:
+  _defaults: { autowire: true }
+  ParityFixture\DefaultFormatter: { class: ParityFixture\DefaultFormatter }
+  ParityFixture\FormatterInterface: '@ParityFixture\DefaultFormatter'
+  ParityFixture\FormatterInterface $textFormatter: '@ParityFixture\DefaultFormatter'
+  ParityFixture\TargetConsumer: { class: ParityFixture\TargetConsumer }
+  ParityFixture\DefaultConsumer: { class: ParityFixture\DefaultConsumer }

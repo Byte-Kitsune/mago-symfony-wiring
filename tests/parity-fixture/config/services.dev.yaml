@@ -1,0 +1,3 @@
+services:
+  ParityFixture\DevFormatter: { class: ParityFixture\DevFormatter }
+  ParityFixture\FormatterInterface $textFormatter: '@ParityFixture\DevFormatter'
