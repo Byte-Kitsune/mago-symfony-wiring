@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace ByteKitsune\MagoSymfonyWiring\Analyzer;
 
-use ByteKitsune\MagoSymfonyWiring\ServiceConfigLoader;
+use ByteKitsune\MagoSymfonyWiring\ServiceMapLoader;
 use Mago\Sdk\Analyzer\Plugin;
 use Mago\Sdk\Analyzer\PluginDefinition;
 use Mago\Sdk\Analyzer\PluginRegistry;
 
 final class WiringPlugin implements Plugin
 {
-    public function __construct(private readonly ServiceConfigLoader $loader) {}
+    public function __construct(private readonly ServiceMapLoader $loader) {}
 
     public function getDefinition(): PluginDefinition
     {

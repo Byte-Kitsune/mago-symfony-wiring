@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace ByteKitsune\MagoSymfonyWiring\Analyzer;
 
-use ByteKitsune\MagoSymfonyWiring\ServiceConfigLoader;
+use ByteKitsune\MagoSymfonyWiring\ServiceMapLoader;
 use Mago\Sdk\Analyzer\AfterFileAnalysisContext;
 use Mago\Sdk\Analyzer\AfterFileAnalysisHook;
 use Mago\Sdk\Analyzer\Metadata\MemberIdentifier;
@@ -17,7 +17,7 @@ use PhpParser\ParserFactory;
 /** Adds only constructor-to-concrete-class edges proven by literal dev wiring. */
 final class AutowiringReferenceHook implements AfterFileAnalysisHook
 {
-    public function __construct(private readonly ServiceConfigLoader $loader) {}
+    public function __construct(private readonly ServiceMapLoader $loader) {}
 
     public function getRequirements(): array { return []; }
 
@@ -26,6 +26,7 @@ final class AutowiringReferenceHook implements AfterFileAnalysisHook
         if (!str_ends_with($context->analysis->file, '.php')) return;
         $map = $this->loader->load();
         if ($map->incomplete !== []) return;
+        $constructorBindings = $this->loader->constructorClassBindings();
         $source = $context->analysis->getSourceFile();
         try {
             $statements = (new ParserFactory())->createForNewestSupportedVersion()->parse($source->contents);
@@ -41,7 +42,7 @@ final class AutowiringReferenceHook implements AfterFileAnalysisHook
             $owner = $declaration->namespacedName->toString();
             $constructor = $declaration->getMethod('__construct');
             if ($constructor === null) continue;
-            foreach ($constructor->params as $parameter) {
+            foreach ($constructor->params as $position => $parameter) {
                 if (!$parameter->type instanceof Node\Name) continue;
                 $type = ($parameter->type->getAttribute('resolvedName') ?? $parameter->type)->toString();
                 $target = null;
@@ -54,8 +55,12 @@ final class AutowiringReferenceHook implements AfterFileAnalysisHook
                     else $target = $value->value;
                 }
                 if ($invalidTarget) continue;
-                $id = $target === null ? $map->resolveType($type) : $map->resolveTarget($type, $target);
-                $class = $id === null ? null : $map->services[$id]['class'];
+                if (array_key_exists($position, $constructorBindings[$owner] ?? [])) {
+                    $class = $constructorBindings[$owner][$position];
+                } else {
+                    $id = $target === null ? $map->resolveType($type) : $map->resolveTarget($type, $target);
+                    $class = $id === null ? null : $map->services[$id]['class'];
+                }
                 if ($class === null || $context->codebase->getClassLike($class) === null) continue;
                 $context->references->add(new MemberIdentifier($owner, '__construct'), $class);
             }
