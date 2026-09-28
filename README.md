@@ -3,7 +3,7 @@
 [![Tests](https://github.com/Byte-Kitsune/mago-symfony-wiring/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/Byte-Kitsune/mago-symfony-wiring/actions/workflows/check.yml)
 [![Security Check](https://github.com/Byte-Kitsune/mago-symfony-wiring/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/Byte-Kitsune/mago-symfony-wiring/actions/workflows/security.yml)
 
-Static evidence for Symfony service wiring in [Mago](https://mago.carthage.software/1.50.0/en/). This beta is an **Analyzer** plugin: it checks constructor `#[Target]` bindings and adds proven autowiring references to Mago's symbol graph. It parses configuration; it never boots Symfony or executes PHP service files.
+Dev-container evidence for Symfony service wiring in [Mago](https://mago.carthage.software/1.50.0/en/). This beta is an **Analyzer** plugin: it checks constructor `#[Target]` bindings and adds proven autowiring references to Mago's symbol graph. The analyzer reads a sanitized reference; it never boots Symfony or executes application PHP.
 
 Start with the [small runnable example](examples/README.md) to see why a dev service override and a named `#[Target]` need explicit wiring evidence.
 
@@ -12,7 +12,7 @@ Start with the [small runnable example](examples/README.md) to see why a dev ser
 Requires PHP 8.2+ and Mago 1.50. Pin the beta in your project:
 
 ```sh
-composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.6
+composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.7
 ```
 
 Add an extension host to `mago.toml`:
@@ -21,6 +21,19 @@ Add an extension host to `mago.toml`:
 [extension-hosts.php]
 command = ["php", ".mago/extensions.php"]
 ```
+
+Generate a small reference from the **dev** container after Symfony has compiled the current source and configuration. Run these commands only in a trusted application checkout. Do not use `--show-hidden` with `--types`: Symfony filters that view differently.
+
+```sh
+mkdir -p .mago
+php bin/console debug:container --env=dev --types --format=json --no-interaction > /tmp/mago-types.json
+php bin/console debug:container --env=dev --format=json --no-interaction > /tmp/mago-services.json
+php vendor/byte-kitsune/mago-symfony-wiring/bin/create-container-reference.php \
+  --types=/tmp/mago-types.json --services=/tmp/mago-services.json \
+  > .mago/container-reference.dev.json
+```
+
+The `--types` view supplies automatic interface and named aliases; the ordinary view supplies concrete classes behind service IDs that the types view can omit. The exporter retains only IDs, classes, alias targets and positional constructor service references; scalar argument values are discarded. Protect the raw debug output, which can contain application arguments, and regenerate the reference after source or service configuration changes. Its hash identifies the two input views; it does not prove a Git revision. `config/reference.php` is Symfony's IDE type schema for PHP configuration, **not** the effective service map ([Symfony configuration docs](https://symfony.com/doc/current/configuration.html)).
 
 Create `.mago/extensions.php`:
 
@@ -33,19 +46,21 @@ use Mago\Sdk\Worker;
 $root = dirname(__DIR__);
 require $root . '/vendor/autoload.php';
 
-(new Worker(SymfonyWiringExtension::create($root, [
-    'config/services.yaml',
-    'config/services.dev.yaml',
-])))->run();
+(new Worker(SymfonyWiringExtension::fromContainerReference(
+    $root,
+    '.mago/container-reference.dev.json',
+)))->run();
 ```
 
-Run `vendor/bin/mago analyze`. List the service files explicitly, in merge order: shared files first, then dev overrides. Paths are relative to the project root. `config/services/dev/*.yaml` files can be listed individually; test, prod and staging paths are rejected. The worker is trusted configuration, so review its file list alongside code changes.
+Run `vendor/bin/mago analyze`. A missing, linked, oversized, malformed or non-dev reference fails the worker. A target absent from the compiled reference remains unresolved; the plugin does not invent a class. In CI, export from the exact checkout in a trusted setup stage and pass the immutable reference to analysis. Do not boot an untrusted PR checkout inside the analysis worker.
 
-## Supported configuration
+## Optional source-only configuration
+
+If booting Symfony is unavailable, `SymfonyWiringExtension::create($root, $files)` still parses an explicit ordered list of shared and dev YAML/PHP service files. It is a narrower mode: list files in merge order, shared first and dev overrides next. Paths are relative to the project root. `config/services/dev/*.yaml` files can be listed individually; test, prod and staging paths are rejected.
 
 Each selected YAML or PHP file needs a `services` node. The parser supports explicit service classes, aliases, arguments and `autowire`; `_defaults` also accepts boolean `autoconfigure`. YAML `when@dev.services` overrides the file's shared entries. PHP files must return a literal `App::config(['services' => ...])` expression; supported literals include strings, booleans, `ClassName::class`, arrays and `service('id')`. Dynamic expressions are incomplete.
 
-A simple autowired namespace `resource` directory can back an explicit alias to a class ID. The loader verifies that class's source file, applies literal path and brace-list exclusions, rejects abstract or attributed exclusions, and hashes the file. It resolves only classes reached by explicit aliases; it does not enumerate every resource service or infer Symfony's automatic interface aliases. Unsupported resource globs and service imports keep the map incomplete. If your application relies on an automatic interface alias, add an explicit alias for analysis or use a separately verified dev-container binding. The [Symfony autowiring guide](https://symfony.com/doc/current/service_container/autowiring.html) explains when Symfony creates an automatic alias.
+A simple autowired namespace `resource` directory can back an explicit alias to a class ID. The loader verifies that class's source file, applies literal path and brace-list exclusions, rejects abstract or attributed exclusions, and hashes the file. It resolves only classes reached by explicit aliases; it does not enumerate every resource service or infer Symfony's automatic interface aliases. Unsupported resource globs and service imports keep the map incomplete. Use the compiled reference above for those ordinary Symfony cases. The [Symfony autowiring guide](https://symfony.com/doc/current/service_container/autowiring.html) explains when Symfony creates an automatic alias.
 
 For example, this YAML binds a named target and a default interface:
 
@@ -68,32 +83,31 @@ final class ReportController
 }
 ```
 
-`#[Target]` without a proven matching dev binding produces the `unresolved-target` warning. A missing, linked, oversized or unsupported service file makes the map incomplete; the plugin does not guess bindings from partial configuration.
+`#[Target]` without a proven matching dev binding produces the `unresolved-target` warning. In source-only mode, a missing, linked, oversized or unsupported service file makes the map incomplete; the plugin does not guess bindings from partial configuration.
 
 The Analyzer emits one `analysis-attestation` note after a PHP source run. Its bounded `extension-attestation` payload records version, `service_wiring` capability, source-file count and whether all selected service files were read completely. A gate that depends on Symfony wiring should require this note even when there are no warnings.
 
 ## Use the service map in other plugins
 
-`ServiceConfigLoader` returns a `ServiceMap` with `incomplete` reasons and SHA-256 `hashes` for selected configuration and resource-target files. It reads once per loader instance; create a new instance for a new analysis run. `classBindings()` maps typed/default or named targets to declared classes. `serviceClassBindings()` maps exact selected IDs and aliases to declared classes. Both return no bindings when the selected map is incomplete:
+`ContainerReferenceLoader` or `ServiceConfigLoader` returns a `ServiceMap`. Each loader reads once per instance; create a new instance for a new analysis run. `classBindings()` maps typed/default or named targets to declared classes. `constructorClassBindings()` maps an owner class and constructor position to its concrete compiled target (or `null` when unresolved or conflicting). `serviceClassBindings()` maps exact selected IDs and aliases to declared classes. Both return no bindings when the selected map is incomplete:
 
 ```php
-use ByteKitsune\MagoSymfonyWiring\ServiceConfigLoader;
+use ByteKitsune\MagoSymfonyWiring\ContainerReferenceLoader;
 
-$map = (new ServiceConfigLoader($root, [
-    'config/services.yaml',
-    'config/services.dev.yaml',
-]))->load();
+$loader = new ContainerReferenceLoader($root, '.mago/container-reference.dev.json');
+$map = $loader->load();
 
 $typeBindings = $map->classBindings();
+$constructorBindings = $loader->constructorClassBindings();
 $serviceBindings = $map->serviceClassBindings();
 $complete = $map->incomplete === [];
 ```
 
-These are literal dev-configuration facts, not a compiled-container model. Proven constructor bindings add references to Mago's symbol graph, which can improve unused-definition evidence. The plugin does not suppress Mago's native dead-code diagnostics or claim that every runtime service is reachable.
+The compiled reference reflects Symfony's dev autowiring type view plus its ordinary service view. It does not prove runtime behavior or complete query reachability. Proven constructor bindings add references to Mago's symbol graph, which can improve unused-definition evidence. The plugin does not suppress Mago's native dead-code diagnostics or claim that every runtime service is reachable.
 
 ## Compare with the Symfony dev container
 
-For a selected-wiring parity gate, run Symfony's `debug:container` separately in a trusted dev environment and pipe its JSON directly to the comparison command. Use the same ordered service-file list as the Mago extension host:
+For the narrower source-only mode, a selected-wiring parity gate compares its inferred IDs with Symfony's debug container. Use the same ordered service-file list as the Mago extension host:
 
 ```sh
 set -o pipefail

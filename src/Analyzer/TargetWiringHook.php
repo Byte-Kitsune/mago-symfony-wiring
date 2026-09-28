@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace ByteKitsune\MagoSymfonyWiring\Analyzer;
 
-use ByteKitsune\MagoSymfonyWiring\ServiceConfigLoader;
+use ByteKitsune\MagoSymfonyWiring\ServiceMapLoader;
 use ByteKitsune\MagoSymfonyWiring\SymfonyWiringExtension;
 use Mago\Sdk\Analyzer\AfterAnalysisContext;
 use Mago\Sdk\Analyzer\AfterAnalysisHook;
@@ -20,11 +20,12 @@ use PhpParser\ParserFactory;
 
 final class TargetWiringHook implements AfterAnalysisHook
 {
-    public function __construct(private readonly ServiceConfigLoader $loader) {}
+    public function __construct(private readonly ServiceMapLoader $loader) {}
 
     public function afterAnalysis(AfterAnalysisContext $context): void
     {
         $map = $this->loader->load();
+        $constructorBindings = $this->loader->constructorClassBindings();
         $parser = (new ParserFactory())->createForNewestSupportedVersion();
         $finder = new NodeFinder();
         $sourceFiles = 0;
@@ -42,9 +43,12 @@ final class TargetWiringHook implements AfterAnalysisHook
             } catch (\Throwable) {
                 continue; // Native Mago parse diagnostics are authoritative.
             }
-            foreach ($finder->findInstanceOf($statements, Node\Stmt\ClassMethod::class) as $method) {
-                if (strtolower($method->name->toString()) !== '__construct') continue;
-                foreach ($method->params as $parameter) {
+            foreach ($finder->findInstanceOf($statements, Node\Stmt\Class_::class) as $declaration) {
+                if (!$declaration->namespacedName instanceof Node\Name) continue;
+                $owner = $declaration->namespacedName->toString();
+                $constructor = $declaration->getMethod('__construct');
+                if ($constructor === null) continue;
+                foreach ($constructor->params as $position => $parameter) {
                     if (!$parameter->type instanceof Node\Name) continue;
                     $type = ($parameter->type->getAttribute('resolvedName') ?? $parameter->type)->toString();
                     foreach ($parameter->attrGroups as $group) foreach ($group->attrs as $attribute) {
@@ -52,7 +56,9 @@ final class TargetWiringHook implements AfterAnalysisHook
                         if ($attributeType !== 'Symfony\\Component\\DependencyInjection\\Attribute\\Target') continue;
                         $name = $attribute->args[0]->value ?? null;
                         if (!$name instanceof Node\Scalar\String_) continue;
-                        if ($map->resolveTarget($type, $name->value) !== null) continue;
+                        if (array_key_exists($position, $constructorBindings[$owner] ?? [])) {
+                            if ($constructorBindings[$owner][$position] !== null) continue;
+                        } elseif ($map->resolveTarget($type, $name->value) !== null) continue;
                         $issue = Issue::at(
                             'No proven dev service binding for #[Target] ' . $type . ' $' . $name->value,
                             new SourceLocation($source->path, new Span($attribute->getStartFilePos(), $attribute->getEndFilePos() + 1)),

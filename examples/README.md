@@ -12,3 +12,5 @@ cd examples/formatter
 ```
 
 Look for `byte-kitsune/symfony-wiring/unresolved-target` and `analysis-attestation`. The missing target is an intentional warning; whether warnings fail the command depends on your Mago fail level. The worker lists shared and dev files explicitly, in override order; this example does not boot Symfony.
+
+For an ordinary Symfony app, use the [compiled dev-container reference workflow](../README.md#install-and-run) instead. It captures automatic interface aliases, named targets and PHP/YAML dev overrides without reproducing Symfony's loader in this extension. The reference is generated in a trusted setup step; Mago only reads its sanitized result.

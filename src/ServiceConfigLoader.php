@@ -12,12 +12,14 @@ use PhpParser\ParserFactory;
 use Symfony\Component\Yaml\Yaml;
 
 /** Reads only explicit shared/dev service files; PHP configuration is parsed, never run. */
-final class ServiceConfigLoader
+final class ServiceConfigLoader implements ServiceMapLoader
 {
     private ?ServiceMap $cached = null;
 
     /** @param list<string> $files Ordered checkout-relative shared/dev service files. */
     public function __construct(private readonly string $root, private readonly array $files) {}
+
+    public function constructorClassBindings(): array { return []; }
 
     public function load(): ServiceMap
     {
