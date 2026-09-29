@@ -57,6 +57,62 @@ try {
         throw new RuntimeException('Constructor service references were not resolved by position.');
     }
 
+    // Symfony may emit named arguments in arbitrary key order, including a
+    // vendor service unrelated to the application's own constructor calls.
+    $namedClass = Symfony\Component\DependencyInjection\Definition::class;
+    $typeView = json_decode(file_get_contents($types), true, 64, JSON_THROW_ON_ERROR);
+    $typeView['definitions']['twig.mime_body_renderer'] = ['class' => $namedClass, 'arguments' => [null, ['type' => 'service', 'id' => 'app.special_reader']]];
+    file_put_contents($types, json_encode($typeView, JSON_THROW_ON_ERROR));
+    file_put_contents($services, json_encode([
+        'definitions' => [
+            'app.special_reader' => ['class' => 'App\\Service\\SpecialReader'],
+            'twig.mime_body_renderer' => ['class' => $namedClass, 'arguments' => [
+                '$arguments' => ['type' => 'service', 'id' => 'app.special_reader'],
+                '$class' => 'private scalar',
+            ]],
+            'sparse.service' => ['class' => $namedClass, 'arguments' => [1 => ['type' => 'service', 'id' => 'app.special_reader']]],
+            'scalar.only' => ['class' => 'App\\UnloadedClass', 'arguments' => ['$secret' => 'private value']],
+        ],
+        'aliases' => [],
+    ], JSON_THROW_ON_ERROR));
+    [$exit, $namedOutput, $error] = $run();
+    if ($exit !== 0 || $error !== '' || str_contains($namedOutput, 'private value') || str_contains($namedOutput, 'private scalar')) {
+        throw new RuntimeException('Named constructor arguments were not safely exported: ' . $error);
+    }
+    $namedReference = json_decode($namedOutput, true, 64, JSON_THROW_ON_ERROR);
+    if (($namedReference['definitions']['twig.mime_body_renderer']['arguments'] ?? null) !== [null, 'app.special_reader']
+        || ($namedReference['definitions']['sparse.service']['arguments'] ?? null) !== [null, 'app.special_reader']
+        || ($namedReference['definitions']['scalar.only']['arguments'] ?? null) !== []) {
+        throw new RuntimeException('Named and sparse constructor references lost their positions.');
+    }
+    file_put_contents($reference, $namedOutput);
+    $namedBindings = (new ContainerReferenceLoader($root, 'config/container-reference.dev.json'))->constructorClassBindings();
+    if (($namedBindings[$namedClass] ?? null) !== [0 => null, 1 => 'App\\Service\\SpecialReader']) {
+        throw new RuntimeException('Named constructor binding was not resolved by the loader.');
+    }
+
+    file_put_contents($services, json_encode([
+        'definitions' => ['twig.mime_body_renderer' => ['class' => $namedClass, 'arguments' => [
+            '$missing' => ['type' => 'service', 'id' => 'app.special_reader'],
+        ]]],
+        'aliases' => [],
+    ], JSON_THROW_ON_ERROR));
+    [$exit, , $error] = $run();
+    if ($exit !== 2 || !str_contains($error, 'Unknown named constructor argument')) {
+        throw new RuntimeException('Unknown named service reference was silently misbound.');
+    }
+
+    file_put_contents($services, json_encode([
+        'definitions' => ['unknown.service' => ['class' => 'App\\UnloadedClass', 'arguments' => [
+            '$dependency' => ['type' => 'service', 'id' => 'app.special_reader'],
+        ]]],
+        'aliases' => [],
+    ], JSON_THROW_ON_ERROR));
+    [$exit, , $error] = $run();
+    if ($exit !== 2 || !str_contains($error, 'Cannot reflect constructor')) {
+        throw new RuntimeException('Unreflectable named service reference was silently dropped.');
+    }
+
     file_put_contents($services, json_encode([
         'definitions' => ['App\\Service\\DefaultReader' => ['class' => 'App\\Service\\OtherReader']],
         'aliases' => [],

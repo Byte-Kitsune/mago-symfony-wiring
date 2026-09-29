@@ -12,7 +12,7 @@ Start with the [small runnable example](examples/README.md) to see why a dev ser
 Requires PHP 8.2+ and Mago 1.50. Pin the beta in your project:
 
 ```sh
-composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.7
+composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.8
 ```
 
 Add an extension host to `mago.toml`:
@@ -33,7 +33,7 @@ php vendor/byte-kitsune/mago-symfony-wiring/bin/create-container-reference.php \
   > .mago/container-reference.dev.json
 ```
 
-The `--types` view supplies automatic interface and named aliases; the ordinary view supplies concrete classes behind service IDs that the types view can omit. The exporter retains only IDs, classes, alias targets and positional constructor service references; scalar argument values are discarded. Protect the raw debug output, which can contain application arguments, and regenerate the reference after source or service configuration changes. Its hash identifies the two input views; it does not prove a Git revision. `config/reference.php` is Symfony's IDE type schema for PHP configuration, **not** the effective service map ([Symfony configuration docs](https://symfony.com/doc/current/configuration.html)).
+The `--types` view supplies automatic interface and named aliases; the ordinary view supplies concrete classes behind service IDs that the types view can omit. The exporter retains only IDs, classes, alias targets and positional constructor service references; scalar argument values are discarded. Symfony may encode constructor arguments by name (for example `$converter`) or as sparse numeric positions. The exporter uses the application's Composer autoloader to reflect named service arguments onto their actual constructor positions; an unknown class or parameter with a service reference fails explicitly instead of guessing an order. This is a **trusted setup** command because Composer autoload files can execute PHP. Protect the raw debug output, which can contain application arguments, and regenerate the reference after source or service configuration changes. Its hash identifies the two input views; it does not prove a Git revision. `config/reference.php` is Symfony's IDE type schema for PHP configuration, **not** the effective service map ([Symfony configuration docs](https://symfony.com/doc/current/configuration.html)).
 
 Create `.mago/extensions.php`:
 
