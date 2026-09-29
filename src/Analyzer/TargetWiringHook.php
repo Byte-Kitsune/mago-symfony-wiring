@@ -71,7 +71,7 @@ final class TargetWiringHook implements AfterAnalysisHook
                 }
             }
         }
-        if ($firstSource !== null) {
+        if ($firstSource !== null && getenv('MAGO_SYMFONY_WIRING_ATTESTATION') === '1') {
             $attestation = [
                 'schema_version' => '1',
                 'extension' => 'byte-kitsune/symfony-wiring',

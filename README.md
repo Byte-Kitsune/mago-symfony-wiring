@@ -12,7 +12,7 @@ Start with the [small runnable example](examples/README.md) to see why a dev ser
 Requires PHP 8.2+ and Mago 1.50. Pin the beta in your project:
 
 ```sh
-composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.9
+composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.10
 ```
 
 Add an extension host to `mago.toml`:
@@ -85,7 +85,7 @@ final class ReportController
 
 `#[Target]` without a proven matching dev binding produces the `unresolved-target` warning. In source-only mode, a missing, linked, oversized or unsupported service file makes the map incomplete; the plugin does not guess bindings from partial configuration.
 
-The Analyzer emits one `analysis-attestation` note after a PHP source run. Its bounded `extension-attestation` payload records version, `service_wiring` capability, source-file count and whether all selected service files were read completely. A gate that depends on Symfony wiring should require this note even when there are no warnings.
+Normal Mago runs report only wiring findings. For an orchestrator that must prove the extension completed, set `MAGO_SYMFONY_WIRING_ATTESTATION=1` on its Mago process. This emits one `analysis-attestation` note after a PHP source run. Its bounded `extension-attestation` payload records version, `service_wiring` capability, source-file count and whether all selected service files were read completely. A gate that depends on Symfony wiring should require this note even when there are no warnings. Argus enables it for its own checks and removes it from user-facing findings.
 
 ## Use the service map in other plugins
 
