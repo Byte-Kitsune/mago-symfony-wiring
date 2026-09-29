@@ -5,13 +5,13 @@ declare(strict_types=1);
 /** Sanitizes two Symfony debug:container JSON views into one dev reference. */
 $paths = [];
 foreach (array_slice($argv, 1) as $argument) {
-    if (preg_match('/^--(types|services)=(.+)$/D', $argument, $match) && !isset($paths[$match[1]])) $paths[$match[1]] = $match[2];
-    else { fwrite(STDERR, "Usage: php bin/create-container-reference.php --types=TYPES.json --services=SERVICES.json\n"); exit(2); }
+    if (preg_match('/^--(types|services|autoload)=(.+)$/D', $argument, $match) && !isset($paths[$match[1]])) $paths[$match[1]] = $match[2];
+    else { fwrite(STDERR, "Usage: php bin/create-container-reference.php --types=TYPES.json --services=SERVICES.json [--autoload=APP_VENDOR_AUTOLOAD.php]\n"); exit(2); }
 }
 
 $parameterPositions = [];
 $autoloadLoaded = false;
-$normalizeArguments = static function (array $raw, ?string $class, string $id) use (&$parameterPositions, &$autoloadLoaded): array {
+$normalizeArguments = static function (array $raw, ?string $class, string $id) use (&$parameterPositions, &$autoloadLoaded, $paths): array {
     if (count($raw) > 128) throw new UnexpectedValueException('Too many constructor arguments for ' . $id);
     if (array_is_list($raw)) {
         return array_map(static function (mixed $argument): ?string {
@@ -29,8 +29,18 @@ $normalizeArguments = static function (array $raw, ?string $class, string $id) u
     if ($namedServiceReference) {
         if ($class === null || $class === '') throw new UnexpectedValueException('Cannot resolve named constructor arguments for ' . $id);
         if (!$autoloadLoaded) {
-            foreach ([dirname(__DIR__) . '/vendor/autoload.php', dirname(__DIR__, 3) . '/autoload.php'] as $autoload) {
-                if (is_file($autoload)) { require_once $autoload; break; }
+            $autoloaders = array_filter([
+                $paths['autoload'] ?? null,
+                getcwd() . '/vendor/autoload.php',
+                dirname(__DIR__) . '/vendor/autoload.php',
+                dirname(__DIR__, 3) . '/autoload.php',
+            ], static fn (mixed $path): bool => is_string($path));
+            foreach (array_unique($autoloaders) as $autoload) {
+                if (!is_file($autoload)) {
+                    if ($autoload === ($paths['autoload'] ?? null)) throw new RuntimeException('Application Composer autoloader is missing.');
+                    continue;
+                }
+                require_once $autoload;
             }
             $autoloadLoaded = true;
         }
@@ -73,7 +83,8 @@ $normalizeArguments = static function (array $raw, ?string $class, string $id) u
 };
 
 try {
-    if (count($paths) !== 2) throw new InvalidArgumentException('Both Symfony debug views are required.');
+    if (!isset($paths['types'], $paths['services'])) throw new InvalidArgumentException('Both Symfony debug views are required.');
+    if (isset($paths['autoload']) && !is_file($paths['autoload'])) throw new RuntimeException('Application Composer autoloader is missing.');
     $views = [];
     $hashes = [];
     foreach (['types', 'services'] as $kind) {
@@ -95,6 +106,8 @@ try {
     $classes = [];
     foreach (['types', 'services'] as $kind) foreach ($views[$kind]['definitions'] as $id => $definition) {
         $class = is_array($definition) ? $definition['class'] ?? null : null;
+        // Symfony can render a classless abstract definition as class: "".
+        if ($class === '') $class = null;
         if (!is_string($id) || $id === '' || !is_array($definition) || !is_string($class) && $class !== null) {
             throw new UnexpectedValueException('Invalid service definition.');
         }
@@ -108,7 +121,9 @@ try {
         foreach ($views[$kind]['definitions'] as $id => $definition) {
             $rawArguments = $definition['arguments'] ?? [];
             if (!is_array($rawArguments)) throw new UnexpectedValueException('Unsupported constructor arguments for ' . $id);
-            $arguments = $normalizeArguments($rawArguments, $classes[$id] ?? null, $id);
+            // A classless definition has no constructor to bind. In particular,
+            // abstract service templates can appear with an empty class field.
+            $arguments = ($classes[$id] ?? null) === null ? [] : $normalizeArguments($rawArguments, $classes[$id], $id);
             $previous = $definitions[$id]['arguments'] ?? [];
             if ($previous !== [] && $arguments !== []) {
                 $merged = array_fill(0, max(count($previous), count($arguments)), null);
