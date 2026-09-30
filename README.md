@@ -3,16 +3,16 @@
 [![Tests](https://github.com/Byte-Kitsune/mago-symfony-wiring/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/Byte-Kitsune/mago-symfony-wiring/actions/workflows/check.yml)
 [![Security Check](https://github.com/Byte-Kitsune/mago-symfony-wiring/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/Byte-Kitsune/mago-symfony-wiring/actions/workflows/security.yml)
 
-Dev-container evidence for Symfony service wiring in [Mago](https://mago.carthage.software/1.50.0/en/). This beta is an **Analyzer** plugin: it checks constructor `#[Target]` bindings and adds proven autowiring references to Mago's symbol graph. The analyzer reads a sanitized reference; it never boots Symfony or executes application PHP.
+Dev-container evidence for Symfony service wiring in [Mago](https://mago.carthage.software/1.50.0/en/). This **Analyzer** plugin checks constructor `#[Target]` bindings and adds proven autowiring references to Mago's symbol graph. The analyzer reads a sanitized reference; it never boots Symfony or executes application PHP.
 
 Start with the [small runnable example](examples/README.md) to see why a dev service override and a named `#[Target]` need explicit wiring evidence.
 
 ## Install and run
 
-Requires PHP 8.2+ and Mago 1.50. Pin the beta in your project:
+Requires PHP 8.2+ and Mago 1.50. Pin the release in your project:
 
 ```sh
-composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:0.1.0-beta.10
+composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:1.0.0
 ```
 
 Add an extension host to `mago.toml`:
