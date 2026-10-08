@@ -18,6 +18,25 @@ if(count($markers)!==1) exit(1);
 $note=$markers[0]["notes"][0]??"";
 if(!str_starts_with($note,"extension-attestation: ")) exit(1);
 $value=json_decode(substr($note,strlen("extension-attestation: ")),true,512,JSON_THROW_ON_ERROR);
-if(($value["extension"]??null)!=="byte-kitsune/symfony-wiring" || ($value["version"]??null)!=="1.0.0" || ($value["capability"]??null)!=="service_wiring" || ($value["complete"]??null)!==true || ($value["source_files"]??0)<1) exit(1);
+if(($value["extension"]??null)!=="byte-kitsune/symfony-wiring" || ($value["version"]??null)!=="1.1.0" || ($value["capability"]??null)!=="service_wiring" || ($value["complete"]??null)!==true || ($value["source_files"]??0)<1) exit(1);
 echo "Mago wiring corpus passed\n";
+'
+cd ../..
+php tests/security.php
+sh tests/security-cli.sh
+cd tests/security-corpus
+if ../../vendor/bin/mago lint --only byte-kitsune/symfony-wiring/no-hardcoded-secret --reporting-format json > /tmp/mago-symfony-security-report.json; then
+    echo 'Expected hardcoded credential findings.' >&2
+    exit 1
+fi
+php -r '
+$report=json_decode(file_get_contents("/tmp/mago-symfony-security-report.json"),true,512,JSON_THROW_ON_ERROR);
+$issues=$report["issues"]??[];
+if(count($issues)!==4) exit(1);
+foreach($issues as $issue) {
+    if(($issue["code"]??null)!=="byte-kitsune/symfony-wiring/no-hardcoded-secret") exit(1);
+    if(($issue["level"]??null)!=="Error") exit(1);
+    if(str_contains(json_encode([$issue["message"],$issue["notes"]??[],$issue["help"]??null]),"SENTINEL_SECRET")) exit(1);
+}
+echo "Native Mago security corpus passed\n";
 '

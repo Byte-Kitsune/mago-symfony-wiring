@@ -1,0 +1,9 @@
+version = "1.50.0"
+php-version = "8.2"
+[source]
+paths = ["config.php"]
+[linter.rules.no-literal-password]
+enabled = false
+[extension-hosts.security]
+command = ["php", "worker.php"]
+workers = 1

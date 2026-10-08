@@ -12,7 +12,7 @@ Start with the [small runnable example](examples/README.md) to see why a dev ser
 Requires PHP 8.2+ and Mago 1.50. Pin the release in your project:
 
 ```sh
-composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:1.0.0
+composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:1.1.0
 ```
 
 Add an extension host to `mago.toml`:
@@ -130,3 +130,66 @@ sh tests/smoke.sh
 ```
 
 The [fixture](tests/corpus) exercises YAML, PHP, dev overrides, `#[Target]` and incomplete bindings. A second [fixture](tests/parity-fixture) compiles a real Symfony container and checks matching and drifting bindings. Licensed under [MIT](LICENSE).
+
+## Optional PHP/YAML configuration security (1.1.0)
+
+The independent companion detects hardcoded string/numeric credentials assigned to sensitive names in PHP and YAML. It is opt-in and does not require a Symfony container reference. This is a bounded key-based check; it does not prove that all possible secrets are absent.
+
+```php
+use ByteKitsune\MagoSymfonyWiring\SecurityExtension;
+use Mago\Sdk\Worker;
+
+(new Worker(
+    SymfonyWiringExtension::fromContainerReference(__DIR__, 'var/container-reference.json'),
+    SecurityExtension::create(__DIR__, [
+        // Defaults: password, passwd, pwd, secret, token, api_key,
+        // access_token, client_secret, private_key, authorization.
+        // 'sensitiveKeys' replaces the default list when supplied.
+        'excludePaths' => ['tests/fixtures/*'],
+    ]),
+))->run();
+```
+
+After registering the companion, disable the overlapping native `no-literal-password` rule **only in that project's configuration**:
+
+```toml
+[linter.rules.no-literal-password]
+enabled = false
+```
+
+The companion registers its own enabled error rule, `byte-kitsune/symfony-wiring/no-hardcoded-secret`. Do not disable the native rule before installing/registering the replacement. The extension cannot mutate Mago's native rule configuration. Existing wiring-only registrations keep their existing behavior. Native rule checks run with `mago lint`; analyzer issue filters do not filter these linter diagnostics.
+
+PHP covers assignments, array keys, property assignments/defaults, constant definitions, parameter defaults, and named arguments. Names are normalized from camelCase to snake_case and match whole sensitive keys or underscore-separated suffixes: `dbPassword` and `api_token` match, `bypass` and general `key` metadata do not. Non-empty string/numeric literals and statically concatenated strings are checked. Empty/whitespace values and non-literal expressions (including Symfony `env()` helpers) are outside literal detection. Arbitrary dynamic helpers are not asserted safe.
+
+Only an entire Symfony placeholder is permitted, including `%env(resolve:APP_PASSWORD)%`, `%env(default::APP_PASSWORD)%`, `%env(default:app.secret:APP_PASSWORD)%`, and `%env(enum:App\Enum\Kind:ENV)%`. Prefixes, suffixes, malformed placeholders and missing variable names remain findings. Processor names/arguments are checked syntactically; existence/runtime validity of custom processors is not proven. Diagnostics never include the credential value.
+
+### Explicit source inspection API
+
+Mago's native linter reads PHP, not YAML. For configuration review/indexing outside native PHP lint, inspect explicit file paths without executing either configuration format:
+
+```php
+use ByteKitsune\MagoSymfonyWiring\Security\ConfigSecretInspector;
+
+$report = ConfigSecretInspector::inspectConfigFiles(
+    $projectRoot,
+    ['config/packages/framework.yaml', 'config/services.php'],
+    ['excludePaths' => ['tests/fixtures/*']],
+);
+```
+
+The result is schema version 1: `column_encoding: utf8_bytes`, `issues`, and `incomplete`. Issues contain the same rule code, severity `error`, repository-relative `path`, 1-based `line`/`column` and exclusive `end_line`/`end_column`, plus a value-free `message`. No PHP configuration is executed. Symlink traversal outside the project is rejected. Limits: 512 explicit files, 1 MiB per file, 16 MiB per batch, 4096 issues; callers should batch larger scopes. Missing/invalid/unsupported files or limit exhaustion produce `incomplete`, never a clean result.
+
+YAML is first syntax-validated by Symfony's parser with object/tag execution disabled, then its scalar source tokens provide exact spans. Block/flow mappings, quoted multiline strings, literal/folded block strings and simple scalar anchors/aliases are supported. Complex anchors/aliases, collections at sensitive keys, custom tags and multiline plain scalar continuation are reported as incomplete for that value. General secret detection inside URLs, arbitrary text, positional call arguments, unknown dynamic expressions and complex YAML merge semantics is outside this check.
+
+`SecurityExtension::inspectConfiguration($workerSource, $sourcePath)` returns `{schema_version: 1, status: enabled|absent|unresolved, options?}` without executing the worker. It recognizes one unconditional companion registration in a returned extension array or a top-level `Worker(...)->run()`, including simple assigned extension arrays and namespace import aliases. Conditional, deferred, mutated or dynamically configured registrations are unresolved. For a statically proven `require` result consumed by `Worker(...$extensions)->run()`, the optional `references` list contains folded absolute paths. Only literal paths, `__DIR__`/`__FILE__`, `dirname()` and immutable path variables are folded. Known conditional wiring-extension appends are accepted; unknown mutation invalidates the proof. Callers must restrict these paths to the project, inspect the referenced source themselves, and treat unresolved/ambiguous children as incomplete. An existing canonical extension file alone is not evidence of an active registration.
+
+### Standalone CLI / Composer shortcut
+
+The companion is usable without T3. Native `mago lint` covers PHP. Run the explicit-file CLI for YAML (or PHP + YAML together):
+
+```sh
+php vendor/byte-kitsune/mago-symfony-wiring/bin/check-config-secrets.php \
+  --root=. --file=config/packages/security.yaml --file=config/services.php
+```
+
+Output is the JSON report described above. Exit codes: `0` clean within the supported scope; `1` findings; `2` incomplete coverage or invalid invocation. Repeat `--exclude=tests/fixtures/*` to exclude known fixtures explicitly. Repeat `--sensitive-key=KEY` to replace the default sensitive-key list. No directories are expanded implicitly. For example, a Composer script may name this command `check-config-secrets` and list the repository's relevant configuration files. A code `2` must not be treated as a successful security check.
