@@ -7,6 +7,8 @@ namespace ByteKitsune\MagoSymfonyWiring;
 /** Reads a sanitized snapshot of Symfony's compiled dev service bindings. */
 final class ContainerReferenceLoader implements ServiceMapLoader
 {
+    public const MAX_REFERENCE_BYTES = 64 * 1024 * 1024;
+
     private ?ServiceMap $cached = null;
     private ?array $constructorBindings = null;
 
@@ -27,7 +29,8 @@ final class ContainerReferenceLoader implements ServiceMapLoader
             throw new \RuntimeException('Container reference is missing or linked.');
         }
         $size = filesize($path);
-        if ($size === false || $size < 2 || $size > 16_777_216) throw new \RuntimeException('Container reference exceeds 16 MiB.');
+        if ($size === false || $size < 2) throw new \RuntimeException('Container reference is empty or unreadable.');
+        if ($size > self::MAX_REFERENCE_BYTES) throw new \RuntimeException('Container reference exceeds 64 MiB.');
         $bytes = file_get_contents($path);
         if ($bytes === false || strlen($bytes) !== $size) throw new \RuntimeException('Container reference changed during read.');
         $data = json_decode($bytes, true, 64, JSON_THROW_ON_ERROR);

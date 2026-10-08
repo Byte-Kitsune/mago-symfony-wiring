@@ -12,7 +12,7 @@ $types = $root . '/types.json';
 $services = $root . '/services.json';
 $reference = $root . '/config/container-reference.dev.json';
 $run = static function (array $extra = [], ?string $cwd = null) use ($types, $services): array {
-    $command = [PHP_BINARY, dirname(__DIR__) . '/bin/create-container-reference.php', '--types=' . $types, '--services=' . $services, ...$extra];
+    $command = [PHP_BINARY, '-d', 'memory_limit=1G', dirname(__DIR__) . '/bin/create-container-reference.php', '--types=' . $types, '--services=' . $services, ...$extra];
     $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, $cwd);
     if (!is_resource($process)) throw new RuntimeException('Reference exporter did not start.');
     fclose($pipes[0]);
@@ -182,6 +182,52 @@ PHP);
         (new ContainerReferenceLoader($root, 'config/container-reference.dev.json'))->load();
         throw new RuntimeException('A non-dev reference was accepted.');
     } catch (UnexpectedValueException) {}
+
+    // Exercise export and load together with a sanitized service graph above
+    // 16 MiB, while both raw debug views remain below the 64 MiB input bound.
+    $largeDefinitions = [];
+    $serviceArgument = ['type' => 'service', 'id' => 'shared.' . str_repeat('x', 58)];
+    for ($index = 0; $index < 6000; $index++) {
+        $largeDefinitions['large.service.' . $index] = [
+            'class' => 'App\\LargeService' . $index,
+            'arguments' => array_fill(0, 48, $serviceArgument),
+        ];
+    }
+    file_put_contents($types, json_encode(['definitions' => $largeDefinitions, 'aliases' => []], JSON_THROW_ON_ERROR));
+    file_put_contents($services, json_encode(['definitions' => [], 'aliases' => []], JSON_THROW_ON_ERROR));
+    unset($largeDefinitions);
+    [$exit, $largeOutput, $error] = $run();
+    if ($exit !== 0 || $error !== '' || strlen($largeOutput) <= 16_777_216) {
+        throw new RuntimeException('Large sanitized container export failed: ' . $error);
+    }
+    file_put_contents($reference, $largeOutput);
+    $largeMap = (new ContainerReferenceLoader($root, 'config/container-reference.dev.json'))->load();
+    if (count($largeMap->services) !== 6000 || count($largeMap->services['large.service.0']['arguments']) !== 48) {
+        throw new RuntimeException('Large exported container lost service definitions or constructor edges.');
+    }
+    unset($largeOutput, $largeMap);
+
+    // Large compiled containers exceed the old 16 MiB cap. Valid JSON whitespace
+    // exercises the byte limit without constructing an unrelated service graph.
+    $largeReference = $output . str_repeat(' ', 17 * 1024 * 1024);
+    file_put_contents($reference, $largeReference);
+    $largeMap = (new ContainerReferenceLoader($root, 'config/container-reference.dev.json'))->load();
+    if (($largeMap->classBindings()['App\\Contract\\Reader'] ?? null) !== 'App\\Service\\DefaultReader') {
+        throw new RuntimeException('A valid reference above 16 MiB lost its service bindings.');
+    }
+    unset($largeReference, $largeMap);
+    $file = fopen($reference, 'w');
+    if ($file === false || !ftruncate($file, ContainerReferenceLoader::MAX_REFERENCE_BYTES + 1)) {
+        throw new RuntimeException('Could not create the oversized reference fixture.');
+    }
+    fclose($file);
+    clearstatcache(true, $reference);
+    try {
+        (new ContainerReferenceLoader($root, 'config/container-reference.dev.json'))->load();
+        throw new RuntimeException('A reference above 64 MiB was accepted.');
+    } catch (RuntimeException $error) {
+        if ($error->getMessage() !== 'Container reference exceeds 64 MiB.') throw $error;
+    }
 
     unlink($reference);
     symlink($types, $reference);

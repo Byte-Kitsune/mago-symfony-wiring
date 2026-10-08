@@ -161,7 +161,7 @@ try {
         'source_sha256' => hash('sha256', $hashes['types'] . ':' . $hashes['services']),
     ];
     $json = json_encode($reference, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-    if (strlen($json) > 16_777_216) throw new RuntimeException('Sanitized container reference exceeds 16 MiB.');
+    if (strlen($json) + 1 > 67_108_864) throw new RuntimeException('Sanitized container reference exceeds 64 MiB.');
     echo $json . "\n";
 } catch (Throwable $error) {
     fwrite(STDERR, $error->getMessage() . "\n");

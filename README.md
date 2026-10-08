@@ -12,17 +12,19 @@ Start with the [small runnable example](examples/README.md) to see why a dev ser
 Requires PHP 8.2+ and Mago 1.50. Pin the release in your project:
 
 ```sh
-composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:1.1.0
+composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:1.1.1
 ```
 
 Add an extension host to `mago.toml`:
 
 ```toml
 [extension-hosts.php]
-command = ["php", ".mago/extensions.php"]
+command = ["php", "-d", "display_errors=stderr", "-d", "memory_limit=1G", ".mago/extensions.php"]
 ```
 
-Generate a small reference from the **dev** container after Symfony has compiled the current source and configuration. Run these commands only in a trusted application checkout. Do not use `--show-hidden` with `--types`: Symfony filters that view differently.
+Keep PHP diagnostics on stderr: stdout carries the binary extension protocol. The worker memory allowance above also accommodates large compiled-container maps.
+
+Generate a sanitized reference from the **dev** container after Symfony has compiled the current source and configuration. Run these commands only in a trusted application checkout. Do not use `--show-hidden` with `--types`: Symfony filters that view differently.
 
 ```sh
 mkdir -p .mago
@@ -51,6 +53,8 @@ require $root . '/vendor/autoload.php';
     '.mago/container-reference.dev.json',
 )))->run();
 ```
+
+The exporter accepts up to 64 MiB per raw debug view, and the sanitized reference must be at most 64 MiB, including its trailing newline. The loader accepts the same limit; the 100,000 service/alias and 128 constructor-argument bounds still apply.
 
 Run `vendor/bin/mago analyze`. A missing, linked, oversized, malformed or non-dev reference fails the worker. A target absent from the compiled reference remains unresolved; the plugin does not invent a class. In CI, export from the exact checkout in a trusted setup stage and pass the immutable reference to analysis. Do not boot an untrusted PR checkout inside the analysis worker.
 

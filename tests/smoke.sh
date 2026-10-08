@@ -18,7 +18,7 @@ if(count($markers)!==1) exit(1);
 $note=$markers[0]["notes"][0]??"";
 if(!str_starts_with($note,"extension-attestation: ")) exit(1);
 $value=json_decode(substr($note,strlen("extension-attestation: ")),true,512,JSON_THROW_ON_ERROR);
-if(($value["extension"]??null)!=="byte-kitsune/symfony-wiring" || ($value["version"]??null)!=="1.1.0" || ($value["capability"]??null)!=="service_wiring" || ($value["complete"]??null)!==true || ($value["source_files"]??0)<1) exit(1);
+if(($value["extension"]??null)!=="byte-kitsune/symfony-wiring" || ($value["version"]??null)!=="1.1.1" || ($value["capability"]??null)!=="service_wiring" || ($value["complete"]??null)!==true || ($value["source_files"]??0)<1) exit(1);
 echo "Mago wiring corpus passed\n";
 '
 cd ../..
