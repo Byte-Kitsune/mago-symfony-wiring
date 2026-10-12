@@ -7,6 +7,7 @@ jobs:
       fail-fast: false
       matrix:
         mago: ["1.50.0", "^1.50"]
+        backend: ["php", "rust"]
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
@@ -14,5 +15,18 @@ jobs:
           php-version: '8.5'
           tools: composer:v2
       - run: composer update --with "carthage-software/mago:${{ matrix.mago }}" --no-interaction --prefer-dist --no-plugins --no-scripts
+      - name: Build native engine
+        if: matrix.backend == 'rust'
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --component clippy --component rustfmt
+          cargo +1.99.0 fmt --manifest-path native/Cargo.toml -- --check
+          cargo +1.99.0 clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings
+          cargo +1.99.0 test --locked --manifest-path native/Cargo.toml
+          cargo +1.99.0 build --release --locked --manifest-path native/Cargo.toml
+          echo "MAGO_NATIVE_ENGINE=$GITHUB_WORKSPACE/native/target/release/mago-extension-engine" >> "$GITHUB_ENV"
+          echo "MAGO_NATIVE_STRICT=1" >> "$GITHUB_ENV"
       - run: find src tests -name '*.php' -exec php -l {} \;
       - run: sh tests/smoke.sh
+      - name: Compare complete PHP and Rust reports
+        if: matrix.backend == 'rust'
+        run: python3 tests/native-parity.py "$GITHUB_WORKSPACE"

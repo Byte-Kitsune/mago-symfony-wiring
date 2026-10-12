@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace ByteKitsune\MagoSymfonyWiring\Analyzer;
 
+if (!class_exists(\ByteKitsune\MagoNative\Engine::class, false)) require_once dirname(__DIR__) . '/NativeEngine.php';
+if (!class_exists(\ByteKitsune\MagoNative\Parser::class, false)) require_once dirname(__DIR__) . '/NativeParser.php';
+
+
 use ByteKitsune\MagoSymfonyWiring\ServiceMapLoader;
 use Mago\Sdk\Analyzer\AfterFileAnalysisContext;
 use Mago\Sdk\Analyzer\AfterFileAnalysisHook;
@@ -28,8 +32,13 @@ final class AutowiringReferenceHook implements AfterFileAnalysisHook
         if ($map->incomplete !== []) return;
         $constructorBindings = $this->loader->constructorClassBindings();
         $source = $context->analysis->getSourceFile();
+        if (!class_exists(\ByteKitsune\MagoNative\Engine::class, false)) require_once dirname(__DIR__) . '/NativeEngine.php';
+        if (\ByteKitsune\MagoNative\Engine::enabled()) {
+            $this->nativeReferences($context, $source->contents, $map, $constructorBindings);
+            return;
+        }
         try {
-            $statements = (new ParserFactory())->createForNewestSupportedVersion()->parse($source->contents);
+            $statements = \ByteKitsune\MagoNative\Parser::create()->parse($source->contents);
             if ($statements === null) return;
             $statements = (new NodeTraverser(new NameResolver()))->traverse($statements);
         } catch (\Throwable) {
@@ -66,4 +75,40 @@ final class AutowiringReferenceHook implements AfterFileAnalysisHook
             }
         }
     }
+    private function nativeReferences(AfterFileAnalysisContext $context, string $source, \ByteKitsune\MagoSymfonyWiring\ServiceMap $map, array $bindings): void
+    {
+        try {
+            $constructors = \ByteKitsune\MagoNative\Engine::analyze($source)['constructors'];
+        } catch (\PhpParser\Error) { return; }
+        $references = [];
+        foreach ($constructors as $constructor) foreach ($constructor['parameters'] as $parameter) {
+            $type = $parameter['class_type'];
+            if ($type === null) continue;
+            $owner = $constructor['owner']; $position = $parameter['position'];
+            $target = null; $invalid = false;
+            foreach ($parameter['attributes'] as $attribute) {
+                if ($attribute['name'] !== 'Symfony\\Component\\DependencyInjection\\Attribute\\Target') continue;
+                if ($target !== null || $attribute['literal'] === null) $invalid = true;
+                else $target = $attribute['literal'];
+            }
+            if ($invalid) continue;
+            if (array_key_exists($position, $bindings[$owner] ?? [])) $class = $bindings[$owner][$position];
+            else {
+                $id = $target === null ? $map->resolveType($type) : $map->resolveTarget($type, $target);
+                $class = $id === null ? null : $map->services[$id]['class'];
+            }
+            if ($class !== null) $references[] = [$owner, $class];
+        }
+        // Resolve all concrete targets in batches instead of one round trip per parameter.
+        $classes = array_values(array_unique(array_column($references, 1)));
+        $known = [];
+        foreach (array_chunk($classes, 256) as $batch) {
+            $context->cancellation->throwIfCancelled();
+            foreach ($context->codebase->getMultipleClassLikes($batch) as $position => $metadata) {
+                if ($metadata !== null) $known[$batch[$position]] = true;
+            }
+        }
+        foreach ($references as [$owner, $class]) if (isset($known[$class])) $context->references->add(new MemberIdentifier($owner, '__construct'), $class);
+    }
+
 }

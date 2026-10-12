@@ -201,3 +201,15 @@ php vendor/byte-kitsune/mago-symfony-wiring/bin/check-config-secrets.php \
 ```
 
 Output is the JSON report described above. Exit codes: `0` clean within the supported scope; `1` findings; `2` incomplete coverage or invalid invocation. Repeat `--exclude=tests/fixtures/*` to exclude known fixtures explicitly. Repeat `--sensitive-key=KEY` to replace the default sensitive-key list. No directories are expanded implicitly. For example, a Composer script may name this command `check-config-secrets` and list the repository's relevant configuration files. A code `2` must not be treated as a successful security check.
+
+
+## Native computational backend
+
+An opt-in Rust backend is available on this development branch. It preserves
+the existing Mago PHP worker and configuration API. Build with
+`cargo build --release --locked --manifest-path native/Cargo.toml` and set
+`MAGO_NATIVE_ENGINE` to that executable before running Mago.
+
+See [native backend details](NATIVE_BACKEND.md) for migrated components,
+compatibility fallback and validation. This does not change the default backend
+of the previously published releases.

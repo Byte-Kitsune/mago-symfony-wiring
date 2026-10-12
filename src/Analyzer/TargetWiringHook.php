@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace ByteKitsune\MagoSymfonyWiring\Analyzer;
 
+if (!class_exists(\ByteKitsune\MagoNative\Engine::class, false)) require_once dirname(__DIR__) . '/NativeEngine.php';
+if (!class_exists(\ByteKitsune\MagoNative\Parser::class, false)) require_once dirname(__DIR__) . '/NativeParser.php';
+
+
 use ByteKitsune\MagoSymfonyWiring\ServiceMapLoader;
 use ByteKitsune\MagoSymfonyWiring\SymfonyWiringExtension;
 use Mago\Sdk\Analyzer\AfterAnalysisContext;
@@ -24,9 +28,10 @@ final class TargetWiringHook implements AfterAnalysisHook
 
     public function afterAnalysis(AfterAnalysisContext $context): void
     {
+        if (!class_exists(\ByteKitsune\MagoNative\Engine::class, false)) require_once dirname(__DIR__) . '/NativeEngine.php';
         $map = $this->loader->load();
         $constructorBindings = $this->loader->constructorClassBindings();
-        $parser = (new ParserFactory())->createForNewestSupportedVersion();
+        $parser = \ByteKitsune\MagoNative\Parser::create();
         $finder = new NodeFinder();
         $sourceFiles = 0;
         $firstSource = null;
@@ -36,6 +41,31 @@ final class TargetWiringHook implements AfterAnalysisHook
             $source = $file->getSourceFile();
             $firstSource ??= $source;
             $sourceFiles++;
+            if (\ByteKitsune\MagoNative\Engine::enabled()) {
+                try {
+                    $constructors = \ByteKitsune\MagoNative\Engine::analyze($source->contents)['constructors'];
+                } catch (\PhpParser\Error) {
+                    continue; // Native Mago parse diagnostics are authoritative.
+                }
+                foreach ($constructors as $constructor) foreach ($constructor['parameters'] as $parameter) {
+                    $type = $parameter['class_type'];
+                    if ($type === null) continue;
+                    $owner = $constructor['owner'];
+                    $position = $parameter['position'];
+                    foreach ($parameter['attributes'] as $attribute) {
+                        if ($attribute['name'] !== 'Symfony\\Component\\DependencyInjection\\Attribute\\Target' || $attribute['literal'] === null) continue;
+                        $name = $attribute['literal'];
+                        if (array_key_exists($position, $constructorBindings[$owner] ?? [])) {
+                            if ($constructorBindings[$owner][$position] !== null) continue;
+                        } elseif ($map->resolveTarget($type, $name) !== null) continue;
+                        $issue = Issue::at('No proven dev service binding for #[Target] ' . $type . ' $' . $name,
+                            new SourceLocation($source->path, new Span($attribute['start'], $attribute['end'])));
+                        if ($map->incomplete !== []) $issue = $issue->withNote('Service configuration is incomplete: ' . implode('; ', array_slice($map->incomplete, 0, 3)));
+                        $context->report(Level::Warning, 'unresolved-target', $issue);
+                    }
+                }
+                continue;
+            }
             try {
                 $statements = $parser->parse($source->contents);
                 if ($statements === null) continue;
