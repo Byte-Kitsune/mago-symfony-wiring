@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.2 — 2026-10-12
+
+- Allow Mago >=1.50.0,<2.0.0 instead of restricting dependencies to the 1.50 minor series.
+- Use a major-version pin in executable Mago configurations and test the supported API floor plus latest compatible 1.x in CI.
+
 ## 1.1.1
 
 - Accept sanitized compiled-container references up to 64 MiB in the exporter and loader, matching the existing raw-view input limit for large Symfony applications.
