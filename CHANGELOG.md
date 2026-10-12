@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0-RC1 — 2026-10-12
 
 - Add an opt-in shared Rust computational backend selected by `MAGO_NATIVE_ENGINE`, retaining the version-matched PHP SDK adapter.
 - Verify native strict mode and complete fixture-report parity in CI against the minimum and latest supported Mago versions.

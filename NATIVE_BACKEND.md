@@ -13,8 +13,8 @@ Configuration loading/validation, reporting, selected graph binding proofs and S
 ## Build and use
 
 ```sh
-cargo build --release --locked
-export MAGO_NATIVE_ENGINE=/absolute/path/to/target/release/mago-extension-engine
+cargo +1.99.0 build --release --locked --manifest-path native/Cargo.toml
+export MAGO_NATIVE_ENGINE=/absolute/path/to/native/target/release/mago-extension-engine
 mago analyze
 ```
 
@@ -26,6 +26,18 @@ Transport/source caches are bounded. Native failures produce explicit errors; a 
 
 ## Validation
 
-Run Rust unit tests and Clippy, then the complete extension suites under native strict mode on Mago 1.50.0 and 1.56.3. `tests/parity.py` compares complete real-Mago fixture reports against the PHP backend. Query Budget includes the 20,000-source benchmark, the 25,000-source rejection and snapshot-file failure isolation.
+Run Rust unit tests and Clippy, then the complete extension suites under native strict mode on Mago 1.50.0 and 1.56.3. `tests/native-parity.py` compares complete real-Mago fixture reports against the PHP backend. Query Budget includes the 20,000-source benchmark, the 25,000-source rejection and snapshot-file failure isolation.
 
-The local build and tests currently target Linux x86_64/PHP 8.5. Cross-platform packaging and native-mode CI/release assets must be completed before a public release; no released extension has been silently switched to this backend.
+The local build and tests currently target Linux x86_64/PHP 8.5. The release candidate includes a Linux x86_64 binary and SHA-256 checksum. macOS/Windows builds are not validated yet; build from source with Rust 1.99.0 on those platforms. The PHP backend remains the default; set MAGO_NATIVE_ENGINE to use Rust. Stable releases have not been switched to this backend.
+
+## Release candidate 1.2.0-RC1
+
+Install this candidate explicitly with Composer; its RC stability does not replace the stable package automatically. All three extensions can use the same trusted engine executable. After downloading the Linux asset, verify its SHA-256 and set its executable permission with `chmod +x`.
+
+```sh
+composer require --dev byte-kitsune/mago-symfony-wiring:1.2.0-RC1
+export MAGO_NATIVE_ENGINE=/absolute/path/to/mago-extension-engine-linux-x86_64
+mago analyze
+```
+
+For a comparison run, unset MAGO_NATIVE_ENGINE to select PHP. Use the same sources and configuration for both runs.
