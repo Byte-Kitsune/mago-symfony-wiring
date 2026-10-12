@@ -9,10 +9,14 @@ Start with the [small runnable example](examples/README.md) to see why a dev ser
 
 ## Install and run
 
-Requires PHP 8.2+ and Mago 1.50. Pin the release in your project:
+The Composer requirement `^1.50` permits later Mago 1.x releases and excludes 2.x.
+Mago 1.50 remains the tested API floor; older releases are not covered.
+CI checks this floor and the latest compatible 1.x release.
+
+Requires PHP 8.2+ and Mago >=1.50.0,<2.0.0. Pin the release in your project:
 
 ```sh
-composer require --dev carthage-software/mago:1.50.0 byte-kitsune/mago-symfony-wiring:1.1.1
+composer require --dev "carthage-software/mago:^1.50" byte-kitsune/mago-symfony-wiring:1.1.2
 ```
 
 Add an extension host to `mago.toml`:

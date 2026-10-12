@@ -5,7 +5,7 @@
   "license": "MIT",
   "require": {
     "php": "^8.2",
-    "carthage-software/mago": "1.50.*",
+    "carthage-software/mago": "^1.50",
     "nikic/php-parser": "^5.9",
     "symfony/yaml": "^7.4 || ^8.0"
   },
