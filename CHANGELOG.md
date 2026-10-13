@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 — 2026-10-13
+
+- Publish the tested RC3 functionality as a stable release with Rust engine 0.3.0 as the default computational backend.
+- Download verified Linux x86_64 and macOS arm64/x86_64 engine assets from the stable Architecture Graph 1.3.0 release.
+- Preserve corrected callable binding, real recursion checks, conservative higher-order query bounds and opt-in native tracing.
+
 ## 1.2.0-RC3 — pending validation
 
 - Fix false query-budget recursion and query counts caused by executing first-class callable targets during binding. Preserve binding-expression effects, actual recursive-call detection and incomplete higher-order bounds.

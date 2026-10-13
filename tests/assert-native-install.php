@@ -16,7 +16,7 @@ final class ReleaseFixtureStream
     {
         ++self::$requests;
         $asset = 'mago-extension-engine-' . Runtime::platform();
-        $base = 'https://github.com/Byte-Kitsune/mago-architecture-graph/releases/download/v1.3.0-RC3/';
+        $base = 'https://github.com/Byte-Kitsune/mago-architecture-graph/releases/download/v1.3.0/';
         if ($path === $base . $asset . '.sha256') $this->bytes = (self::$badChecksum ? str_repeat('0', 64) : hash('sha256', self::$binary)) . '  ' . $asset . "\n";
         elseif ($path === $base . $asset) $this->bytes = self::$binary;
         else return false;

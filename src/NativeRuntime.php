@@ -8,7 +8,7 @@ namespace ByteKitsune\MagoNative;
 final class Runtime
 {
     public const VERSION = '0.3.0';
-    private const RELEASE = 'https://github.com/Byte-Kitsune/mago-architecture-graph/releases/download/v1.3.0-RC3/';
+    private const RELEASE = 'https://github.com/Byte-Kitsune/mago-architecture-graph/releases/download/v1.3.0/';
 
     public static function executable(): string
     {
