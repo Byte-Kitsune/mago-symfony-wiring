@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0-RC2 — pending validation
+
+- Make Rust the default computational backend; require a compatible engine and remove automatic PHP grammar fallback.
+- Install verified platform assets into one shared cache and provide offline/preinstall controls.
+- Test Linux and both macOS architectures, default selection and complete reference-report parity.
+- Add opt-in recursion traces and neutral delegation regressions; project-specific parity investigation remains pending.
+
 ## 1.2.0-RC1 — 2026-10-12
 
 - Add an opt-in shared Rust computational backend selected by `MAGO_NATIVE_ENGINE`, retaining the version-matched PHP SDK adapter.

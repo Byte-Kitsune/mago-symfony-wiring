@@ -2,12 +2,19 @@ name: Check
 on: [push, pull_request]
 jobs:
   extension:
-    runs-on: ubuntu-latest
+    env:
+      MAGO_EXTENSION_BACKEND: ${{ matrix.backend == 'php' && 'php' || '' }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        mago: ["1.50.0", "^1.50"]
-        backend: ["php", "rust"]
+        include:
+          - {mago: "1.50.0", backend: php, runner: ubuntu-latest, asset: linux-x86_64}
+          - {mago: "^1.50", backend: php, runner: ubuntu-latest, asset: linux-x86_64}
+          - {mago: "1.50.0", backend: rust, runner: ubuntu-latest, asset: linux-x86_64}
+          - {mago: "^1.50", backend: rust, runner: ubuntu-latest, asset: linux-x86_64}
+          - {mago: "^1.50", backend: rust, runner: macos-15, asset: macos-arm64}
+          - {mago: "^1.50", backend: rust, runner: macos-15-intel, asset: macos-x86_64}
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
@@ -25,8 +32,24 @@ jobs:
           cargo +1.99.0 build --release --locked --manifest-path native/Cargo.toml
           echo "MAGO_NATIVE_ENGINE=$GITHUB_WORKSPACE/native/target/release/mago-extension-engine" >> "$GITHUB_ENV"
           echo "MAGO_NATIVE_STRICT=1" >> "$GITHUB_ENV"
+      - name: Verify native default and runtime behavior
+        if: matrix.backend == 'rust'
+        run: |
+          php tests/assert-native-runtime.php
+          php tests/assert-native-install.php
       - run: find src tests -name '*.php' -exec php -l {} \;
       - run: sh tests/smoke.sh
       - name: Compare complete PHP and Rust reports
         if: matrix.backend == 'rust'
         run: python3 tests/native-parity.py "$GITHUB_WORKSPACE"
+      - name: Package native engine
+        if: matrix.backend == 'rust' && matrix.mago == '^1.50'
+        run: |
+          mkdir -p release-assets
+          cp native/target/release/mago-extension-engine release-assets/mago-extension-engine-${{ matrix.asset }}
+      - uses: actions/upload-artifact@v4
+        if: matrix.backend == 'rust' && matrix.mago == '^1.50'
+        with:
+          name: native-${{ matrix.asset }}
+          path: release-assets/mago-extension-engine-${{ matrix.asset }}
+          if-no-files-found: error

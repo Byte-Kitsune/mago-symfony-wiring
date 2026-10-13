@@ -1,16 +1,20 @@
-# Shared native engine for the Mago extensions
+# Native Rust backend
 
-The extension hosts continue to use Mago's version-matched PHP SDK. Their computational backend is a persistent Rust process. This preserves the Mago >=1.50,<2.0 integration without maintaining another implementation of the MANA protocol.
+Rust is the default computational backend for all three extensions. PHP retains the version-matched Mago SDK adapter, policy/configuration loaders, binding proofs and reporting; Symfony container export still executes in PHP.
 
-Implemented native paths:
+The engine is resolved from MAGO_NATIVE_ENGINE, a local native/bin or native/target/release build, then the shared user cache. When missing, the platform-specific release asset is installed once after SHA-256 verification. macOS arm64, macOS x86_64 and Linux x86_64 have CI build/test coverage. All extensions reuse the same engine version. Rust compilation is not needed for release binaries.
 
-- Architecture Graph: Mago parsing/name resolution, literal class-reference collection, syntax conversion, batched lazy BFS traversal with predecessor links, and iterative SCC cycle detection.
-- Doctrine Query Budget: source parsing, the project method/function/trait index, receiver/constructor bindings, conservative control-flow and call evaluation, recursion/work limits, and saturated estimate arithmetic. Project sessions isolate binding variants. The PHP adapter caches reporting metadata by immutable analysis generation and binding configuration.
-- Symfony Wiring: constructor/attribute extraction shared between wiring checks and semantic-reference generation. Concrete target lookups are batched through the SDK.
+## Installation and offline use
 
-Configuration loading/validation, reporting, selected graph binding proofs and Symfony's actual container export remain PHP. This is a native computational backend, not a replacement of every PHP source file or a dynamic library loaded by Mago.
+The first analysis installs the engine. To preinstall explicitly:
 
-## Build and use
+```sh
+php vendor/byte-kitsune/mago-architecture-graph/bin/install-native.php
+```
+
+Equivalent installers are provided by the other packages. Set XDG_CACHE_HOME to choose the shared cache. Set MAGO_NATIVE_DOWNLOAD=0 to disable downloads after preinstallation. An unavailable or incompatible engine produces an error; it never selects the PHP backend automatically.
+
+For a source build:
 
 ```sh
 cargo +1.99.0 build --release --locked --manifest-path native/Cargo.toml
@@ -18,26 +22,18 @@ export MAGO_NATIVE_ENGINE=/absolute/path/to/native/target/release/mago-extension
 mago analyze
 ```
 
-Use the adapters prepared for all three extension repositories. Their PHP SDK dependencies still allow `^1.50`. `MAGO_NATIVE_ENGINE` must point to a trusted executable. The analyzed source is passed as immutable data; the engine never opens source paths or executes PHP.
+Source builds use Rust 1.99.0 because the pinned Mago parser dependency declares that requirement. The host SDK continues to support Mago >=1.50,<2.0. Existing RC1 binaries must be replaced with engine 0.2.0.
 
-`MAGO_NATIVE_STRICT=1` disables the compatibility fallback for unsupported native syntax. Production fallback retains the existing PHP parser for grammar not mapped into the native interchange yet; query evaluation still runs in Rust. Parser counters distinguish native and fallback parses. Operator configuration/security inspection continues to use the established PHP implementation.
+## Parsing and diagnostics
 
-Transport/source caches are bounded. Native failures produce explicit errors; a broken transport is never treated as a successful empty report. No source is cached across engine processes or commands.
+The default parser performs no PHP grammar fallback. Unsupported syntax is reported as incomplete/error evidence rather than being treated as a successful empty analysis.
 
-## Validation
+For diagnosis only, MAGO_EXTENSION_BACKEND=php selects the retained reference implementation. tests/native-parity.py compares complete reports under both backends. This reference path is not an automatic production fallback.
 
-Run Rust unit tests and Clippy, then the complete extension suites under native strict mode on Mago 1.50.0 and 1.56.3. `tests/native-parity.py` compares complete real-Mago fixture reports against the PHP backend. Query Budget includes the 20,000-source benchmark, the 25,000-source rejection and snapshot-file failure isolation.
+MAGO_NATIVE_TRACE=1 writes native recursion call paths to stderr without changing the normal report. Paths can contain project class names; leave tracing disabled unless diagnosing a finding.
 
-The local build and tests currently target Linux x86_64/PHP 8.5. The release candidate includes a Linux x86_64 binary and SHA-256 checksum. macOS/Windows builds are not validated yet; build from source with Rust 1.99.0 on those platforms. The PHP backend remains the default; set MAGO_NATIVE_ENGINE to use Rust. Stable releases have not been switched to this backend.
+Bounded transport, source caches and project sessions remain command-local. Analyzed source is immutable data and never selects or executes the engine binary.
 
-## Release candidate 1.2.0-RC1
+## Production parity status
 
-Install this candidate explicitly with Composer; its RC stability does not replace the stable package automatically. All three extensions can use the same trusted engine executable. After downloading the Linux asset, verify its SHA-256 and set its executable permission with `chmod +x`.
-
-```sh
-composer require --dev byte-kitsune/mago-symfony-wiring:1.2.0-RC1
-export MAGO_NATIVE_ENGINE=/absolute/path/to/mago-extension-engine-linux-x86_64
-mago analyze
-```
-
-For a comparison run, unset MAGO_NATIVE_ENGINE to select PHP. Use the same sources and configuration for both runs.
+Neutral delegation regressions cover promoted and assigned service receivers, same-named endpoint methods, direct cycles and constructor bindings. The externally reported additional recursive-call and incomplete findings still need their anonymized source and evidence to reproduce; passing fixture parity does not establish parity for those project-specific cases.

@@ -18,17 +18,9 @@ final class Parser
 
     public function parse(string $source): array
     {
-        try {
-            $nodes = Engine::ast($source);
-            ++self::$nativeParses;
-            return self::hydrate($nodes);
-        } catch (\PhpParser\Error $error) {
-            if (!str_starts_with($error->getMessage(), 'Unsupported native syntax:') || getenv('MAGO_NATIVE_STRICT') === '1') throw $error;
-            // Unsupported grammar remains explicit in counters. It never produces
-            // a clean result from a missing syntax model.
-            ++self::$fallbackParses;
-            return (new \PhpParser\ParserFactory())->createForNewestSupportedVersion()->parse($source) ?? [];
-        }
+        $nodes = Engine::ast($source);
+        ++self::$nativeParses;
+        return self::hydrate($nodes);
     }
 
     private static function hydrate(mixed $value): mixed

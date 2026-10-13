@@ -19,8 +19,9 @@ final class Engine
 
     public static function enabled(): bool
     {
-        $path = getenv('MAGO_NATIVE_ENGINE');
-        return is_string($path) && $path !== '';
+        $backend = getenv('MAGO_EXTENSION_BACKEND');
+        if ($backend !== false && $backend !== '' && !in_array($backend, ['php', 'rust'], true)) throw new \RuntimeException('MAGO_EXTENSION_BACKEND must be rust or php.');
+        return $backend !== 'php';
     }
 
     public static function analyze(string $source): array
@@ -50,15 +51,15 @@ final class Engine
 
     private function __construct()
     {
-        $path = getenv('MAGO_NATIVE_ENGINE');
-        if (!is_string($path) || !is_file($path) || !is_executable($path)) {
-            throw new \RuntimeException('MAGO_NATIVE_ENGINE must name an executable native engine.');
-        }
+        if (!class_exists(Runtime::class, false)) require_once __DIR__ . '/NativeRuntime.php';
+        $path = Runtime::executable();
         $process = proc_open([$path], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => STDERR], $pipes);
         if (!is_resource($process)) throw new \RuntimeException('Native engine could not be started.');
         $this->process = $process;
         $this->pipes = $pipes;
         stream_set_timeout($this->pipes[1], 60);
+        try { $info = $this->exchange(['op' => 'info'], null); } catch (\Throwable $error) { throw new \RuntimeException('Native engine is incompatible; install engine ' . Runtime::VERSION . ' or update MAGO_NATIVE_ENGINE.', 0, $error); }
+        if (($info['version'] ?? null) !== Runtime::VERSION) throw new \RuntimeException('Native engine version mismatch; install engine ' . Runtime::VERSION . ' or update MAGO_NATIVE_ENGINE.');
     }
 
     public static function walk(string $start, int $limit, bool $transitive, \Closure $callback): array
