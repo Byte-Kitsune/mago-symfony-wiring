@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.2 — 2026-10-13
+
+- Add statically linked Linux musl binaries and SHA-256 checksums for x86_64 and aarch64/arm64.
+- Automatically detect the loaded libc; use separate musl cache paths and a static musl fallback when libc is unknown.
+- Validate ELF architecture and absence of dynamic loader/shared-library dependencies; execute fixture parity tests natively and PHP runtime checks in Alpine for both architectures.
+- Preserve engine 0.3.0 and use Architecture Graph 1.3.2 as the shared asset source.
+
 ## 1.2.1 — 2026-10-13
 
 - Add Linux aarch64/arm64 release binaries and SHA-256 checksums, with automatic shared-cache installation.

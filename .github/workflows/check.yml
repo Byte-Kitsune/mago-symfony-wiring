@@ -15,6 +15,10 @@ jobs:
           - {mago: "^1.50", backend: rust, runner: ubuntu-latest, asset: linux-x86_64}
           - {mago: "1.50.0", backend: rust, runner: ubuntu-22.04-arm, asset: linux-arm64}
           - {mago: "^1.50", backend: rust, runner: ubuntu-22.04-arm, asset: linux-arm64}
+          - {mago: "1.50.0", backend: rust, runner: ubuntu-latest, asset: linux-x86_64-musl, target: x86_64-unknown-linux-musl}
+          - {mago: "^1.50", backend: rust, runner: ubuntu-latest, asset: linux-x86_64-musl, target: x86_64-unknown-linux-musl}
+          - {mago: "1.50.0", backend: rust, runner: ubuntu-22.04-arm, asset: linux-arm64-musl, target: aarch64-unknown-linux-musl}
+          - {mago: "^1.50", backend: rust, runner: ubuntu-22.04-arm, asset: linux-arm64-musl, target: aarch64-unknown-linux-musl}
           - {mago: "^1.50", backend: rust, runner: macos-15, asset: macos-arm64}
           - {mago: "^1.50", backend: rust, runner: macos-15-intel, asset: macos-x86_64}
     steps:
@@ -28,11 +32,25 @@ jobs:
         if: matrix.backend == 'rust'
         run: |
           rustup toolchain install 1.99.0 --profile minimal --component clippy --component rustfmt
+          target="${{ matrix.target }}"
+          target_args=""
+          output="native/target/release/mago-extension-engine"
+          if [ -n "$target" ]; then
+            sudo apt-get update
+            sudo apt-get install --yes musl-tools
+            rustup target add --toolchain 1.99.0 "$target"
+            host=$(rustc +1.99.0 -vV | sed -n 's/^host: //p')
+            sysroot=$(rustc +1.99.0 --print sysroot)
+            export RUSTFLAGS="-C target-feature=+crt-static -C linker=$sysroot/lib/rustlib/$host/bin/rust-lld"
+            export CC=musl-gcc
+            target_args="--target $target"
+            output="native/target/$target/release/mago-extension-engine"
+          fi
           cargo +1.99.0 fmt --manifest-path native/Cargo.toml -- --check
-          cargo +1.99.0 clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings
-          cargo +1.99.0 test --locked --manifest-path native/Cargo.toml
-          cargo +1.99.0 build --release --locked --manifest-path native/Cargo.toml
-          echo "MAGO_NATIVE_ENGINE=$GITHUB_WORKSPACE/native/target/release/mago-extension-engine" >> "$GITHUB_ENV"
+          cargo +1.99.0 clippy --manifest-path native/Cargo.toml --all-targets $target_args -- -D warnings
+          cargo +1.99.0 test --locked --manifest-path native/Cargo.toml $target_args
+          cargo +1.99.0 build --release --locked --manifest-path native/Cargo.toml $target_args
+          echo "MAGO_NATIVE_ENGINE=$GITHUB_WORKSPACE/$output" >> "$GITHUB_ENV"
           echo "MAGO_NATIVE_STRICT=1" >> "$GITHUB_ENV"
       - name: Verify native default and runtime behavior
         if: matrix.backend == 'rust'
@@ -41,6 +59,9 @@ jobs:
           php tests/assert-native-runtime.php
           php tests/assert-native-trace-path.php
           php tests/assert-native-install.php
+      - name: Verify static musl engine and PHP adapter in Alpine
+        if: matrix.target != ''
+        run: sh tests/alpine-native-smoke.sh
       - run: find src tests -name '*.php' -exec php -l {} \;
       - run: sh tests/smoke.sh
       - name: Compare complete PHP and Rust reports
@@ -50,7 +71,7 @@ jobs:
         if: matrix.backend == 'rust' && matrix.mago == '^1.50'
         run: |
           mkdir -p release-assets
-          cp native/target/release/mago-extension-engine release-assets/mago-extension-engine-${{ matrix.asset }}
+          cp "$MAGO_NATIVE_ENGINE" release-assets/mago-extension-engine-${{ matrix.asset }}
           python3 tests/assert-native-binary.py "${{ matrix.asset }}" "release-assets/mago-extension-engine-${{ matrix.asset }}"
       - uses: actions/upload-artifact@v4
         if: matrix.backend == 'rust' && matrix.mago == '^1.50'

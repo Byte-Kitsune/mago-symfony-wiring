@@ -2,7 +2,11 @@
 
 Rust is the default computational backend for all three extensions. PHP retains the version-matched Mago SDK adapter, policy/configuration loaders, binding proofs and reporting; Symfony container export still executes in PHP.
 
-The engine is resolved from MAGO_NATIVE_ENGINE, a local native/bin or native/target/release build, then the shared user cache. When missing, the platform-specific release asset is installed once after SHA-256 verification. macOS arm64, macOS x86_64, Linux x86_64 and Linux aarch64/arm64 have CI build/test coverage. Linux aarch64 and arm64 host names both select the `mago-extension-engine-linux-arm64` asset. Linux arm64 builds and complete fixture tests run natively on Ubuntu 22.04 ARM runners against the minimum and latest supported Mago. Linux release binaries use glibc; the arm64 binary is built on glibc 2.35 (Ubuntu 22.04). All extensions reuse the same engine version. Rust compilation is not needed for release binaries.
+The engine is resolved from MAGO_NATIVE_ENGINE, a local native/bin or native/target/release build, then the shared user cache. When missing, the platform-specific release asset is installed once after SHA-256 verification. macOS arm64, macOS x86_64, Linux x86_64 and Linux aarch64/arm64 have CI build/test coverage. Linux aarch64 and arm64 host names both select the `mago-extension-engine-linux-arm64` asset. Linux arm64 builds and complete fixture tests run natively on Ubuntu 22.04 ARM runners against the minimum and latest supported Mago. GNU Linux assets retain their existing names and glibc requirements; the GNU arm64 binary is built on glibc 2.35 (Ubuntu 22.04). Additional `linux-x86_64-musl` and `linux-arm64-musl` assets are statically linked, with no dynamic loader or shared-library dependency. They are built and executed natively on each Linux architecture with minimum/latest compatible Mago, plus PHP adapter/runtime tests in Alpine containers. All extensions reuse the same engine version. Rust compilation is not needed for release binaries.
+
+## Linux libc selection
+
+The installer reads the running PHP process's loaded libraries from `/proc/self/maps` to distinguish glibc from musl without running shell commands. Alpine/musl selects the static `-musl` asset. If libc cannot be identified (for example, restricted procfs or static PHP), the portable static musl asset is selected. GNU and musl engines use separate cache directories; a previously cached GNU executable is not reused on musl. The engine protocol version remains 0.3.0.
 
 ## Installation and offline use
 

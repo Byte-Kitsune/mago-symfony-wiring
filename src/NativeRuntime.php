@@ -8,7 +8,7 @@ namespace ByteKitsune\MagoNative;
 final class Runtime
 {
     public const VERSION = '0.3.0';
-    private const RELEASE = 'https://github.com/Byte-Kitsune/mago-architecture-graph/releases/download/v1.3.1/';
+    private const RELEASE = 'https://github.com/Byte-Kitsune/mago-architecture-graph/releases/download/v1.3.2/';
 
     public static function executable(): string
     {
@@ -22,10 +22,10 @@ final class Runtime
 
     public static function platform(): string
     {
-        return self::platformIdentifier(PHP_OS_FAMILY, php_uname('m'));
+        return self::platformIdentifier(PHP_OS_FAMILY, php_uname('m'), PHP_OS_FAMILY === 'Linux' ? self::linuxLibc() : 'gnu');
     }
 
-    private static function platformIdentifier(string $osFamily, string $machine): string
+    private static function platformIdentifier(string $osFamily, string $machine, string $libc = 'gnu'): string
     {
         $os = match ($osFamily) {
             'Linux' => 'linux',
@@ -37,7 +37,22 @@ final class Runtime
             'arm64', 'aarch64' => 'arm64',
             default => throw new \RuntimeException('Unsupported native engine CPU architecture.'),
         };
-        return $os . '-' . $arch;
+        if ($os === 'linux' && !in_array($libc, ['gnu', 'musl'], true)) throw new \RuntimeException('Unsupported native Linux C library.');
+        return $os . '-' . $arch . ($os === 'linux' && $libc === 'musl' ? '-musl' : '');
+    }
+
+    private static function linuxLibc(): string
+    {
+        $maps = @file_get_contents('/proc/self/maps', false, null, 0, 262144);
+        return self::libcFromMaps(is_string($maps) ? $maps : '');
+    }
+
+    private static function libcFromMaps(string $maps): string
+    {
+        if (str_contains($maps, '/ld-musl-') || str_contains($maps, '/libc.musl-')) return 'musl';
+        if (preg_match('~/(?:ld-linux[^/\\s]*|libc(?:-[0-9.]+)?\\.so(?:\\.6)?)(?:\\s|$)~', $maps) === 1) return 'gnu';
+        // The static musl release is also runnable when libc cannot be identified.
+        return 'musl';
     }
 
     public static function install(): string
