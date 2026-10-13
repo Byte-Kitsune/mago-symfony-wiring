@@ -36,6 +36,7 @@ jobs:
         if: matrix.backend == 'rust'
         run: |
           php tests/assert-native-runtime.php
+          php tests/assert-native-trace-path.php
           php tests/assert-native-install.php
       - run: find src tests -name '*.php' -exec php -l {} \;
       - run: sh tests/smoke.sh
