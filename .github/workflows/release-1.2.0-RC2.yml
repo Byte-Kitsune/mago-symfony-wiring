@@ -43,7 +43,9 @@ jobs:
           echo "MAGO_NATIVE_STRICT=1" >> "$GITHUB_ENV"
       - name: Verify native default and runtime behavior
         if: matrix.backend == 'rust'
-        run: php tests/assert-native-runtime.php
+        run: |
+          php tests/assert-native-runtime.php
+          php tests/assert-native-install.php
       - run: find src tests -name '*.php' -exec php -l {} \;
       - run: sh tests/smoke.sh
       - name: Compare complete PHP and Rust reports
