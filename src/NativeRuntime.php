@@ -7,8 +7,8 @@ namespace ByteKitsune\MagoNative;
 /** Installs publisher release assets; analyzed source never selects an executable. */
 final class Runtime
 {
-    public const VERSION = '0.3.0';
-    private const RELEASE = 'https://github.com/Byte-Kitsune/mago-architecture-graph/releases/download/v1.3.2/';
+    public const VERSION = '0.4.0';
+    private const RELEASE = 'https://github.com/Byte-Kitsune/mago-architecture-graph/releases/download/v1.4.0-RC1/';
 
     public static function executable(): string
     {

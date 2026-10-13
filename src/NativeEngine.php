@@ -92,6 +92,12 @@ final class Engine
         return self::$instance->request(['op' => 'index-budget-source', 'session' => $session, 'file' => $file, 'source' => $source]);
     }
 
+    public static function frameworkHookClasses(string $session, array $contracts): array
+    {
+        self::$instance ??= new self();
+        return self::$instance->request(['op' => 'framework-hook-classes', 'session' => $session, 'hook_contracts' => $contracts]);
+    }
+
     public static function indexBudgetNodes(string $session, string $file, array $nodes): array
     {
         self::$instance ??= new self();

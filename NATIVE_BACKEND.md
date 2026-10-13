@@ -6,7 +6,7 @@ The engine is resolved from MAGO_NATIVE_ENGINE, a local native/bin or native/tar
 
 ## Linux libc selection
 
-The installer reads the running PHP process's loaded libraries from `/proc/self/maps` to distinguish glibc from musl without running shell commands. Alpine/musl selects the static `-musl` asset. If libc cannot be identified (for example, restricted procfs or static PHP), the portable static musl asset is selected. GNU and musl engines use separate cache directories; a previously cached GNU executable is not reused on musl. The engine protocol version remains 0.3.0.
+The installer reads the running PHP process's loaded libraries from `/proc/self/maps` to distinguish glibc from musl without running shell commands. Alpine/musl selects the static `-musl` asset. If libc cannot be identified (for example, restricted procfs or static PHP), the portable static musl asset is selected. GNU and musl engines use separate cache directories; a previously cached GNU executable is not reused on musl. The engine protocol version remains 0.4.0.
 
 ## Installation and offline use
 
@@ -26,7 +26,7 @@ export MAGO_NATIVE_ENGINE=/absolute/path/to/native/target/release/mago-extension
 mago analyze
 ```
 
-Source builds use Rust 1.99.0 because the pinned Mago parser dependency declares that requirement. The host SDK continues to support Mago >=1.50,<2.0. Existing RC1/RC2 binaries must be replaced with engine 0.3.0.
+Source builds use Rust 1.99.0 because the pinned Mago parser dependency declares that requirement. The host SDK continues to support Mago >=1.50,<2.0. Existing RC1/RC2 binaries must be replaced with engine 0.4.0.
 
 ## Parsing and diagnostics
 
@@ -53,3 +53,7 @@ Neutral regressions cover typed delegation, first-class callable creation, defer
 `$this->mapNode(...)`, `Type::mapNode(...)` and `mapNode(...)` create callables; the analyzer does not execute their target bodies at creation. Receiver and dynamic-name expressions are still evaluated, including their query side effects. Direct recursive calls remain detectable.
 
 Higher-order execution through `array_map` currently has an unknown query bound and remains `query-budget-incomplete`. This is not a proof of infinite tree recursion. First-class callable and arrow-function creation alone must not produce a `recursive-call` issue. The PHP reference evaluator follows the same distinction.
+
+## Engine 0.4.0 candidate
+
+This companion branch synchronizes the shared kernel with Doctrine Query Budget callback-effects improvements. Automatic download assets are reserved for Architecture Graph v1.4.0-RC1 and are not published by this draft. Build locally or select the matching CI binary through `MAGO_NATIVE_ENGINE`. All adapters in a shared worker must use engine 0.4.0.

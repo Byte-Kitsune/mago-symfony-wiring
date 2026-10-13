@@ -23,7 +23,7 @@ final class Parser
         return self::hydrate($nodes);
     }
 
-    private static function hydrate(mixed $value): mixed
+    public static function hydrate(mixed $value): mixed
     {
         if (!is_array($value)) return $value;
         if (isset($value['_comment'])) {

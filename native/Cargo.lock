@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "mago-extension-engine"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "mago-allocator",
  "mago-database",

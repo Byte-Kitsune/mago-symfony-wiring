@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 /** Sanitizes two Symfony debug:container JSON views into one dev reference. */
+require_once dirname(__DIR__) . '/src/FrameworkHookTags.php';
 $paths = [];
 foreach (array_slice($argv, 1) as $argument) {
     if (preg_match('/^--(types|services|autoload)=(.+)$/D', $argument, $match) && !isset($paths[$match[1]])) $paths[$match[1]] = $match[2];
@@ -116,9 +117,11 @@ try {
         }
         if ($class !== null) $classes[$id] = $class;
     }
-    $definitions = $aliases = [];
+    $definitions = $aliases = []; $hookTags = [];
     foreach (['types', 'services'] as $kind) {
         foreach ($views[$kind]['definitions'] as $id => $definition) {
+            $tags = \ByteKitsune\MagoSymfonyWiring\FrameworkHookTags::sanitize($definition['tags'] ?? []);
+            if ($tags !== []) foreach ($tags as $tag => $values) foreach ($values as $attributes) $hookTags[$id][$tag][json_encode($attributes, JSON_THROW_ON_ERROR)] = $attributes;
             $rawArguments = $definition['arguments'] ?? [];
             if (!is_array($rawArguments)) throw new UnexpectedValueException('Unsupported constructor arguments for ' . $id);
             // A classless definition has no constructor to bind. In particular,
@@ -152,8 +155,14 @@ try {
     foreach ($aliases as $id => $_) if (isset($definitions[$id])) throw new UnexpectedValueException('Service and alias share ID ' . $id);
     ksort($definitions, SORT_STRING);
     ksort($aliases, SORT_STRING);
+    if ($hookTags !== []) foreach ($definitions as $id => &$definition) {
+        $definition['tags'] = [];
+        foreach ($hookTags[$id] ?? [] as $tag => $values) $definition['tags'][$tag] = array_values($values);
+        ksort($definition['tags'], SORT_STRING);
+    }
+    unset($definition);
     $reference = [
-        'schema_version' => '2',
+        'schema_version' => $hookTags === [] ? '2' : '3',
         'environment' => 'dev',
         'scope' => 'compiled_container_autowiring',
         'definitions' => $definitions,

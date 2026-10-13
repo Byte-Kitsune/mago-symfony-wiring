@@ -35,7 +35,7 @@ final class ContainerReferenceLoader implements ServiceMapLoader
         if ($bytes === false || strlen($bytes) !== $size) throw new \RuntimeException('Container reference changed during read.');
         $data = json_decode($bytes, true, 64, JSON_THROW_ON_ERROR);
         if (!is_array($data) || array_keys($data) !== ['schema_version', 'environment', 'scope', 'definitions', 'aliases', 'source_sha256']
-            || $data['schema_version'] !== '2' || $data['environment'] !== 'dev' || $data['scope'] !== 'compiled_container_autowiring'
+            || !in_array($data['schema_version'], ['2', '3'], true) || $data['environment'] !== 'dev' || $data['scope'] !== 'compiled_container_autowiring'
             || !is_array($data['definitions']) || !is_array($data['aliases'])
             || !is_string($data['source_sha256']) || !preg_match('/^[a-f0-9]{64}$/D', $data['source_sha256'])
             || count($data['definitions']) + count($data['aliases']) > 100_000) {
@@ -44,7 +44,7 @@ final class ContainerReferenceLoader implements ServiceMapLoader
 
         $services = [];
         foreach ($data['definitions'] as $id => $definition) {
-            if (!self::id($id) || !is_array($definition) || array_keys($definition) !== ['class', 'arguments']
+            if (!self::id($id) || !is_array($definition) || array_keys($definition) !== ($data['schema_version'] === '3' ? ['class', 'arguments', 'tags'] : ['class', 'arguments'])
                 || $definition['class'] !== null && !self::id($definition['class'])
                 || !is_array($definition['arguments']) || !array_is_list($definition['arguments']) || count($definition['arguments']) > 128) {
                 throw new \UnexpectedValueException('Invalid container service definition.');
@@ -52,7 +52,9 @@ final class ContainerReferenceLoader implements ServiceMapLoader
             foreach ($definition['arguments'] as $target) if ($target !== null && !self::id($target)) {
                 throw new \UnexpectedValueException('Invalid container constructor reference.');
             }
-            $services[$id] = ['class' => $definition['class'], 'arguments' => $definition['arguments'], 'autowire' => true, 'origin' => $this->file];
+            $tags = $data['schema_version'] === '3' ? FrameworkHookTags::sanitize($definition['tags']) : [];
+            if ($data['schema_version'] === '3' && $tags !== $definition['tags']) throw new \UnexpectedValueException('Unsanitized hook registration metadata.');
+            $services[$id] = ['class' => $definition['class'], 'arguments' => $definition['arguments'], 'autowire' => true, 'origin' => $this->file, 'tags' => $tags];
         }
         $aliases = [];
         foreach ($data['aliases'] as $id => $target) {
@@ -94,6 +96,13 @@ final class ContainerReferenceLoader implements ServiceMapLoader
         return $this->constructorBindings = $result;
     }
 
+    /** Compiled tag declarations only; does not establish activation or event dispatch. */
+    public function frameworkHookRegistrations(): array { return FrameworkHookTags::registrations($this->load()); }
+    /** Exact configured method targets; unresolved subscribers/default listeners stay in registration evidence. */
+    public function frameworkHookEntrypoints(): array
+    {
+        return array_values(array_unique(array_filter(array_column($this->frameworkHookRegistrations()['registrations'], 'target'), static fn(mixed $value): bool => is_string($value))));
+    }
     private static function id(mixed $value): bool
     {
         return is_string($value) && $value !== '' && strlen($value) <= 512 && !preg_match('/[\x00-\x1f\x7f]/', $value);
