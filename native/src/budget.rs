@@ -101,6 +101,11 @@ fn name(node: &Value) -> String {
 fn is_name(node: &Value) -> bool {
     kind(node).starts_with("Name")
 }
+fn first_class_callable(node: &Value) -> bool {
+    let arguments = array(&node["args"]);
+    arguments.len() == 1 && kind(&arguments[0]) == "VariadicPlaceholder"
+}
+
 fn line(node: &Value) -> i64 {
     node["attributes"]["startLine"].as_i64().unwrap_or(-1)
 }
@@ -446,8 +451,15 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
             return Estimate::unknown("analysis work limit".into());
         }
         match kind(expr) {
+            "Expr_Closure" | "Expr_ArrowFunction" => Estimate::zero(),
             "Expr_MethodCall" | "Expr_NullsafeMethodCall" => {
                 let mut sum = self.expr(&expr["var"], class, file, env, stack);
+                if first_class_callable(expr) {
+                    if kind(&expr["name"]).starts_with("Expr_") {
+                        sum = sum.plus(self.expr(&expr["name"], class, file, env, stack));
+                    }
+                    return sum;
+                }
                 sum = sum.plus(self.args(expr, class, file, env, stack));
                 if kind(&expr["name"]) != "Identifier" {
                     return sum.plus(Estimate::unknown(format!(
@@ -470,6 +482,15 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
                 })
             }
             "Expr_StaticCall" => {
+                if first_class_callable(expr) {
+                    let mut sum = Estimate::zero();
+                    for selector in [&expr["class"], &expr["name"]] {
+                        if kind(selector).starts_with("Expr_") {
+                            sum = sum.plus(self.expr(selector, class, file, env, stack));
+                        }
+                    }
+                    return sum;
+                }
                 let sum = self.args(expr, class, file, env, stack);
                 if is_name(&expr["class"]) && kind(&expr["name"]) == "Identifier" {
                     let scope = string(&expr["class"]["name"]).to_ascii_lowercase();
@@ -526,6 +547,13 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
                 }
             }
             "Expr_FuncCall" => {
+                if first_class_callable(expr) {
+                    return if kind(&expr["name"]).starts_with("Expr_") {
+                        self.expr(&expr["name"], class, file, env, stack)
+                    } else {
+                        Estimate::zero()
+                    };
+                }
                 let sum = self.args(expr, class, file, env, stack);
                 if !is_name(&expr["name"]) {
                     return sum.plus(Estimate::unknown(format!(
@@ -617,7 +645,10 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
         if let Some(object) = metadata["object"].as_str() {
             return Some(object.into());
         }
-        if kind(expr) == "Expr_MethodCall" && kind(&expr["name"]) == "Identifier" {
+        if !first_class_callable(expr)
+            && kind(expr) == "Expr_MethodCall"
+            && kind(&expr["name"]) == "Identifier"
+        {
             let base = self.receiver(&expr["var"], class, file, env)?;
             let method = string(&expr["name"]["name"]).to_ascii_lowercase();
             if base == "Doctrine\\ORM\\QueryBuilder" && method == "getquery" {
@@ -830,12 +861,23 @@ fn breaker(node: &Value, name_: &str, function: bool) -> bool {
         return false;
     }
     fn find(node: &Value, result: &mut Vec<Value>, function: bool) {
-        if kind(node)
-            == if function {
-                "Expr_FuncCall"
-            } else {
-                "Expr_MethodCall"
-            }
+        if [
+            "Expr_Closure",
+            "Expr_ArrowFunction",
+            "Stmt_Class",
+            "Stmt_Function",
+        ]
+        .contains(&kind(node))
+        {
+            return;
+        }
+        if !first_class_callable(node)
+            && kind(node)
+                == if function {
+                    "Expr_FuncCall"
+                } else {
+                    "Expr_MethodCall"
+                }
         {
             result.push(node.clone());
         }
@@ -1141,6 +1183,86 @@ mod tests {
             &[],
         );
         assert_eq!(recursive.cycles, ["sample\\recursiveendpoint::get"]);
+    }
+
+    #[test]
+    fn callable_creation_does_not_invoke_its_target() {
+        let source = r#"<?php
+        namespace Example;
+        final class CallbackModel {
+            public function __construct(private \Doctrine\DBAL\Connection $connection) {}
+            public function tree(array $children): array { return \array_map($this->tree(...), $children); }
+            public function methodReference(): \Closure { return $this->tree(...); }
+            public function arrowReference(): \Closure { return fn(array $children) => $this->tree($children); }
+            public function queryReference(): \Closure { return $this->query(...); }
+            public function query(): void { $this->connection->executeQuery('SELECT 1'); }
+            public function factory(): self { $this->connection->executeQuery('SELECT 1'); return $this; }
+            public function receiverReference(): \Closure { return $this->factory()->query(...); }
+            public static function staticReference(): \Closure { return self::staticReference(...); }
+            public function name(): string { $this->connection->executeQuery('SELECT 1'); return 'query'; }
+            public function dynamicReference(): \Closure { return $this->{$this->name()}(...); }
+            public function directCycle(): void { $this->directCycle(); }
+            public function bounded(int $n): void { if ($n <= 0) return; $cb = $this->bounded(...); $arrow = fn() => $this->bounded(100); $this->bounded($n - 1); }
+        }
+        function functionReference(): \Closure { return functionReference(...); }
+        "#;
+        let mut program = Program::default();
+        program.index_source(
+            crate::syntax::parse(source).unwrap(),
+            "Callback.php",
+            &Env::new(),
+            &BTreeMap::new(),
+        );
+        for method in [
+            "methodReference",
+            "arrowReference",
+            "queryReference",
+            "staticReference",
+        ] {
+            let result = Evaluator::new(&program, false, |_, _| Value::Null).method(
+                "Example\\CallbackModel",
+                method,
+                &[],
+            );
+            assert_eq!(result.upper, Some(0), "{method}: {result:?}");
+            assert!(result.cycles.is_empty());
+        }
+        let tree = Evaluator::new(&program, false, |_, _| Value::Null).method(
+            "Example\\CallbackModel",
+            "tree",
+            &[],
+        );
+        assert_eq!(tree.upper, None);
+        assert!(!tree.unknown.is_empty());
+        assert!(tree.cycles.is_empty());
+        let dynamic = Evaluator::new(&program, false, |_, _| Value::Null).method(
+            "Example\\CallbackModel",
+            "dynamicReference",
+            &[],
+        );
+        assert_eq!((dynamic.lower, dynamic.upper), (1, Some(1)));
+        let receiver = Evaluator::new(&program, false, |_, _| Value::Null).method(
+            "Example\\CallbackModel",
+            "receiverReference",
+            &[],
+        );
+        assert_eq!((receiver.lower, receiver.upper), (1, Some(1)));
+        let function = Evaluator::new(&program, false, |_, _| Value::Null)
+            .function("Example\\functionReference", &[]);
+        assert_eq!(function.upper, Some(0));
+        let direct = Evaluator::new(&program, false, |_, _| Value::Null).method(
+            "Example\\CallbackModel",
+            "directCycle",
+            &[],
+        );
+        assert!(!direct.cycles.is_empty());
+        let bounded = Evaluator::new(&program, false, |_, _| Value::Null).method(
+            "Example\\CallbackModel",
+            "bounded",
+            &[],
+        );
+        assert_eq!(bounded.upper, None);
+        assert!(bounded.cycles.is_empty());
     }
 
     #[test]

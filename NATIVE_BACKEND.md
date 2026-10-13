@@ -22,7 +22,7 @@ export MAGO_NATIVE_ENGINE=/absolute/path/to/native/target/release/mago-extension
 mago analyze
 ```
 
-Source builds use Rust 1.99.0 because the pinned Mago parser dependency declares that requirement. The host SDK continues to support Mago >=1.50,<2.0. Existing RC1 binaries must be replaced with engine 0.2.0.
+Source builds use Rust 1.99.0 because the pinned Mago parser dependency declares that requirement. The host SDK continues to support Mago >=1.50,<2.0. Existing RC1/RC2 binaries must be replaced with engine 0.3.0.
 
 ## Parsing and diagnostics
 
@@ -42,4 +42,10 @@ Bounded transport, source caches and project sessions remain command-local. Anal
 
 ## Production parity status
 
-Neutral delegation regressions cover promoted and assigned service receivers, same-named endpoint methods, direct cycles and constructor bindings. The externally reported additional recursive-call and incomplete findings still need their anonymized source and evidence to reproduce; passing fixture parity does not establish parity for those project-specific cases.
+Neutral regressions cover typed delegation, first-class callable creation, deferred arrow-function bodies, binding-expression effects and real direct cycles. The reported first-class callable pattern is reproduced and corrected. Full production parity and the three other incomplete differences still require a rerun; fixture parity alone does not establish production parity.
+
+## First-class callables
+
+`$this->mapNode(...)`, `Type::mapNode(...)` and `mapNode(...)` create callables; the analyzer does not execute their target bodies at creation. Receiver and dynamic-name expressions are still evaluated, including their query side effects. Direct recursive calls remain detectable.
+
+Higher-order execution through `array_map` currently has an unknown query bound and remains `query-budget-incomplete`. This is not a proof of infinite tree recursion. First-class callable and arrow-function creation alone must not produce a `recursive-call` issue. The PHP reference evaluator follows the same distinction.

@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.2.0-RC3 — pending validation
+
+- Fix false query-budget recursion and query counts caused by executing first-class callable targets during binding. Preserve binding-expression effects, actual recursive-call detection and incomplete higher-order bounds.
+- Use engine 0.3.0 and its separate cache so the corrected evaluator is selected; synchronize the shared kernel across all three extensions.
 
 - Add an operator-selected native trace file so recursion paths survive Mago worker stderr capture; preserve the shared engine adapter across all three extensions.
 
