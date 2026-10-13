@@ -30,7 +30,13 @@ The default parser performs no PHP grammar fallback. Unsupported syntax is repor
 
 For diagnosis only, MAGO_EXTENSION_BACKEND=php selects the retained reference implementation. tests/native-parity.py compares complete reports under both backends. This reference path is not an automatic production fallback.
 
-MAGO_NATIVE_TRACE=1 writes native recursion call paths to stderr without changing the normal report. Paths can contain project class names; leave tracing disabled unless diagnosing a finding.
+MAGO_NATIVE_TRACE=1 writes native recursion call paths to stderr without changing the normal report. Mago captures worker stderr internally; it is not normally shown after a successful worker request. To retain these paths, also set MAGO_NATIVE_TRACE_FILE to an absolute writable regular-file path:
+
+```sh
+MAGO_NATIVE_TRACE=1 MAGO_NATIVE_TRACE_FILE=/tmp/mago-native-recursion.jsonl mago analyze
+```
+
+The file is append-only and contains `native-recursion-trace: ` followed by a JSON array of fully qualified `class::method` identifiers. It captures Rust stderr (including native errors) and does not alter the binary SDK protocol. The final repeated identifier closes the detected cycle; repeated method names in different classes do not form a cycle. Paths can contain project class names; leave tracing disabled unless diagnosing a finding.
 
 Bounded transport, source caches and project sessions remain command-local. Analyzed source is immutable data and never selects or executes the engine binary.
 

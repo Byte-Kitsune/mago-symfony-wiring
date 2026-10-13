@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add an operator-selected native trace file so recursion paths survive Mago worker stderr capture; preserve the shared engine adapter across all three extensions.
+
 ## 1.2.0-RC2 — pending validation
 
 - Make Rust the default computational backend; require a compatible engine and remove automatic PHP grammar fallback.

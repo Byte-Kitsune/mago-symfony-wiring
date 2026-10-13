@@ -53,7 +53,16 @@ final class Engine
     {
         if (!class_exists(Runtime::class, false)) require_once __DIR__ . '/NativeRuntime.php';
         $path = Runtime::executable();
-        $process = proc_open([$path], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => STDERR], $pipes);
+        $stderr = STDERR;
+        $traceHandle = null;
+        $traceFile = getenv('MAGO_NATIVE_TRACE_FILE');
+        if (getenv('MAGO_NATIVE_TRACE') === '1' && is_string($traceFile) && $traceFile !== '') {
+            if (!str_starts_with($traceFile, '/') || is_dir($traceFile) || is_link($traceFile)) throw new \RuntimeException('MAGO_NATIVE_TRACE_FILE must be an absolute regular-file path.');
+            $traceHandle = @fopen($traceFile, 'ab');
+            if ($traceHandle === false) throw new \RuntimeException('MAGO_NATIVE_TRACE_FILE cannot be opened for append.');
+            $stderr = $traceHandle;
+        }
+        try { $process = proc_open([$path], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => $stderr], $pipes); } finally { if (is_resource($traceHandle)) fclose($traceHandle); }
         if (!is_resource($process)) throw new \RuntimeException('Native engine could not be started.');
         $this->process = $process;
         $this->pipes = $pipes;
