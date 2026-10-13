@@ -213,3 +213,7 @@ Linux x86_64 and both macOS architectures are covered by native-mode CI.
 See [native backend details](NATIVE_BACKEND.md) for offline installation, source
 builds, explicit reference-backend comparisons and the pending project-specific
 recursion investigation.
+
+## Framework callback candidate
+
+Preserve sanitized compiled hook tags in optional container schema 3, retain schema 2 compatibility, and expose exact hook method targets plus registration uncertainty. The source-snapshot API is `inspectFrameworkHooks($analysis)`. Hook declarations do not prove request activation. All engine-0.4.0 companion packages must be updated together. See [callback coverage](https://github.com/Byte-Kitsune/mago-doctrine-query-budget/blob/feat/callback-effects-engine-0.4/CALLBACK_COVERAGE.md) for supported families and conservative limits.

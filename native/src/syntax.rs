@@ -157,7 +157,7 @@ impl Emitter<'_, '_> {
             .fold(0, |a, b| a | b)
     }
     fn params(&self, list: &FunctionLikeParameterList<'_>) -> Result<Vec<Value>> {
-        list.parameters.iter().map(|p| Ok(self.node("Param",p.span(),json!({"var":self.node("Expr_Variable",p.variable.span(),json!({"name":text(p.variable.name).trim_start_matches('$')})),"type":p.hint.as_ref().map(|h|self.hint(h)).transpose()?,"default":p.default_value.as_ref().map(|v|self.expr(v.value)).transpose()?,"byRef":p.ampersand.is_some(),"variadic":p.ellipsis.is_some(),"flags":self.flags(&p.modifiers),"attrGroups":self.attrs(&p.attribute_lists)?,"hooks":[]})))).collect()
+        list.parameters.iter().map(|p| { if p.hooks.is_some() { return Err("Unsupported native syntax: promoted property hooks".into()); } Ok(self.node("Param",p.span(),json!({"var":self.node("Expr_Variable",p.variable.span(),json!({"name":text(p.variable.name).trim_start_matches('$')})),"type":p.hint.as_ref().map(|h|self.hint(h)).transpose()?,"default":p.default_value.as_ref().map(|v|self.expr(v.value)).transpose()?,"byRef":p.ampersand.is_some(),"variadic":p.ellipsis.is_some(),"flags":self.flags(&p.modifiers),"attrGroups":self.attrs(&p.attribute_lists)?,"hooks":[]}))) }).collect()
     }
     fn array(
         &self,
@@ -221,6 +221,11 @@ impl Emitter<'_, '_> {
             Expression::Binary(b) => {
                 if matches!(b.operator,BinaryOperator::Instanceof(_)) { self.node("Expr_Instanceof",span,json!({"expr":self.expr(b.lhs)?,"class":self.class_expr(b.rhs)?})) }
                 else { let operator = match b.operator { BinaryOperator::Addition(_) => "Plus", BinaryOperator::Subtraction(_) => "Minus", BinaryOperator::Multiplication(_) => "Mul", BinaryOperator::Division(_) => "Div", BinaryOperator::Modulo(_) => "Mod", BinaryOperator::Equal(_) => "Equal", BinaryOperator::NotEqual(_) | BinaryOperator::AngledNotEqual(_) => "NotEqual", BinaryOperator::Identical(_) => "Identical", BinaryOperator::NotIdentical(_) => "NotIdentical", BinaryOperator::LessThan(_) => "Smaller", BinaryOperator::LessThanOrEqual(_) => "SmallerOrEqual", BinaryOperator::GreaterThan(_) => "Greater", BinaryOperator::GreaterThanOrEqual(_) => "GreaterOrEqual", BinaryOperator::And(_) => "BooleanAnd", BinaryOperator::Or(_) => "BooleanOr", BinaryOperator::NullCoalesce(_) => "Coalesce", BinaryOperator::StringConcat(_) => "Concat", _ => return Err("Unsupported native syntax: binary operator".into()) }; self.node(&format!("Expr_BinaryOp_{operator}"),span,json!({"left":self.expr(b.lhs)?,"right":self.expr(b.rhs)?})) }
+            },
+            Expression::Yield(y) => match y {
+                Yield::Value(y) => self.node("Expr_Yield",span,json!({"key":null,"value":y.value.map(|v|self.expr(v)).transpose()?})),
+                Yield::Pair(y) => self.node("Expr_Yield",span,json!({"key":self.expr(y.key)?,"value":self.expr(y.value)?})),
+                Yield::From(y) => self.node("Expr_YieldFrom",span,json!({"expr":self.expr(y.iterator)?})),
             },
             Expression::Pipe(p) => self.node("Expr_BinaryOp_Pipe",span,json!({"left":self.expr(p.input)?,"right":self.expr(p.callable)?})),
             Expression::Conditional(c) => self.node("Expr_Ternary",span,json!({"cond":self.expr(c.condition)?,"if":c.then.map(|e|self.expr(e)).transpose()?,"else":self.expr(c.r#else)?})),
@@ -348,6 +353,17 @@ pub fn parse(source: &str) -> Result<Vec<Value>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn yield_forms_are_preserved_and_promoted_hooks_are_rejected() {
+        let parsed =
+            parse("<?php function values(){yield; yield 1; yield 2=>3; yield from [4];}").unwrap();
+        let text = serde_json::to_string(&parsed).unwrap();
+        assert!(text.contains("Expr_YieldFrom"));
+        assert_eq!(text.matches("\"nodeType\":\"Expr_Yield\"").count(), 3);
+        assert!(parse("<?php class Hooked {public function __construct(public int $value { get => 1; }) {}}").is_err());
+        assert!(parse("<?php class Hooked {public int $value { get => 1; }}").is_err());
+    }
+
     #[test]
     fn out_of_range_integer_is_not_rewritten_as_a_proven_guard() {
         assert!(parse("<?php final class Counter { function run(int $n): void { if ($n <= 0) return; $this->run($n - 18446744073709551615); } }").is_err());

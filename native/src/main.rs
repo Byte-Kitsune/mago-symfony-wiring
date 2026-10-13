@@ -31,6 +31,7 @@ struct Request {
     transitive: bool,
     session: Option<String>,
     nodes: Option<Vec<Value>>,
+    hook_contracts: Option<Vec<String>>,
 }
 
 type ProjectSession = (
@@ -87,6 +88,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ),
                     );
                     json!({"schema":"1","result":{}})
+                }
+                Ok(request) if request.op == "framework-hook-classes" => {
+                    let session = request.session.unwrap_or_else(|| "legacy".into());
+                    let (program, _, _) = sessions
+                        .get(&session)
+                        .ok_or("Missing native project session")?;
+                    let contracts = request
+                        .hook_contracts
+                        .ok_or("Missing framework hook contracts")?;
+                    if contracts.len() > 256 {
+                        return Err("Framework hook contract limit exceeded".into());
+                    }
+                    json!({"schema":"1","result":program.framework_hook_classes(&contracts)})
                 }
                 Ok(request) if request.op == "index-budget-source" => {
                     let source = request.source.ok_or("Missing source")?;

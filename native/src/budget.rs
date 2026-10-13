@@ -28,7 +28,17 @@ struct Bound {
     count: Option<i64>,
     scalar: bool,
     element: Option<Box<Bound>>,
+    members: Option<std::sync::Arc<Vec<Bound>>>,
+    deferred: Option<std::sync::Arc<Deferred>>,
+    reflection: Option<std::sync::Arc<Callable>>,
+    properties: Option<std::sync::Arc<BTreeMap<String, Bound>>>,
 }
+#[derive(Clone)]
+struct Deferred {
+    target: Callable,
+    arguments: Vec<Bound>,
+}
+
 #[derive(Clone)]
 enum Callable {
     Method(String, String),
@@ -97,9 +107,13 @@ impl Estimate {
 #[derive(Debug, Default, Deserialize)]
 pub struct Program {
     #[serde(default)]
+    pub framework_classes: BTreeMap<String, Value>,
+    #[serde(default)]
     pub methods: BTreeMap<String, Value>,
     #[serde(default)]
     pub constants: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub property_hooks: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub trait_methods: BTreeMap<String, Value>,
     #[serde(default)]
@@ -161,6 +175,61 @@ struct Model<'a> {
 }
 
 impl Program {
+    /// Select declaration candidates from the already indexed snapshot, avoiding source refetch/parsing in PHP.
+    pub fn framework_hook_classes(&self, contracts: &[String]) -> Vec<Value> {
+        let mut ancestry = BTreeMap::<String, Vec<String>>::new();
+        for (owner, interfaces) in &self.interfaces {
+            ancestry
+                .entry(owner.to_ascii_lowercase())
+                .or_default()
+                .extend(interfaces.iter().map(|v| v.to_ascii_lowercase()));
+        }
+        for (owner, parent) in &self.parents {
+            ancestry
+                .entry(owner.to_ascii_lowercase())
+                .or_default()
+                .push(parent.to_ascii_lowercase());
+        }
+        let targets = contracts
+            .iter()
+            .map(|c| c.to_ascii_lowercase())
+            .collect::<std::collections::BTreeSet<_>>();
+        self.framework_classes
+            .iter()
+            .filter_map(|(owner, record)| {
+                let node = &record["node"];
+                let has_hook_attribute = |node: &Value| {
+                    array(&node["attrGroups"]).iter().any(|group| {
+                        array(&group["attrs"]).iter().any(|attribute| {
+                            targets.contains(&name(&attribute["name"]).to_ascii_lowercase())
+                        })
+                    })
+                };
+                let declared = has_hook_attribute(node)
+                    || array(&node["stmts"]).iter().any(|m| {
+                        has_hook_attribute(m)
+                            || string(&m["name"]["name"]).starts_with("__")
+                                && !string(&m["name"]["name"]).eq_ignore_ascii_case("__construct")
+                    });
+                let mut queue = vec![owner.clone()];
+                let mut seen = std::collections::BTreeSet::new();
+                let mut inherited = false;
+                while let Some(next) = queue.pop() {
+                    if targets.contains(&next) {
+                        inherited = true;
+                        break;
+                    }
+                    if seen.len() >= 128 || !seen.insert(next.clone()) {
+                        continue;
+                    }
+                    if let Some(parents) = ancestry.get(&next) {
+                        queue.extend(parents.iter().cloned());
+                    }
+                }
+                (declared || inherited).then(|| record.clone())
+            })
+            .collect()
+    }
     fn parent(&self, class: &str) -> Option<&String> {
         self.parents
             .iter()
@@ -287,6 +356,8 @@ pub struct Evaluator<'a, F: FnMut(&str, &Value) -> Value> {
     uncertain_callback: usize,
     bound_depth: usize,
     callback: F,
+    consume_generator: bool,
+    consumed: Vec<std::sync::Arc<Deferred>>,
 }
 impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
     pub fn new(program: &'a Program, assume_scalar: bool, callback: F) -> Self {
@@ -298,6 +369,8 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
             uncertain_callback: 0,
             bound_depth: 0,
             callback,
+            consume_generator: false,
+            consumed: Vec::new(),
         }
     }
     pub fn method(&mut self, class: &str, method: &str, stack: &[String]) -> Estimate {
@@ -347,13 +420,14 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
         }
         let mut next = stack.to_vec();
         next.push(key);
-        if has_yield(model.node) {
+        if has_yield(model.node) && !std::mem::take(&mut self.consume_generator) {
             return Estimate::zero();
         }
+        let runtime_class = class.to_owned();
         let class = model.class.as_str();
         let file = model.file;
         let mut env = Scope::default();
-        env.insert("this".into(), class.into());
+        env.insert("this".into(), runtime_class);
         for param in array(&model.node["params"]) {
             if kind(&param["var"]) == "Expr_Variable"
                 && param["var"]["name"].is_string()
@@ -363,6 +437,15 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
             }
         }
         self.bind_parameters(model.node, arguments, &mut env, class, file);
+        if let Some(value) = arguments
+            .iter()
+            .find(|arg| arg.argument_name.as_deref() == Some("\0this"))
+        {
+            if let Some(owner) = &value.object {
+                env.insert("this".into(), owner.clone());
+            }
+            env.values.insert("this".into(), value.clone());
+        }
         self.statements(array(&model.node["stmts"]), class, file, env, &next)
     }
     pub fn function(&mut self, function_name: &str, stack: &[String]) -> Estimate {
@@ -408,7 +491,7 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
         }
         let mut next = stack.to_vec();
         next.push(key);
-        if has_yield(&model["node"]) {
+        if has_yield(&model["node"]) && !std::mem::take(&mut self.consume_generator) {
             return Estimate::zero();
         }
         let mut env = Scope::default();
@@ -520,6 +603,12 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
                 }
                 "Stmt_Foreach" => {
                     sum = sum.plus(self.expr(&stmt["expr"], class, file, &mut env, stack));
+                    let iterable = self.bound(&stmt["expr"], class, file, &env);
+                    if iterable.count.is_none() {
+                        let mut consumption = self.consume(&iterable, stack, file);
+                        consumption.lower = 0;
+                        sum = sum.plus(consumption);
+                    }
                     if stmt["byRef"] == true {
                         invalidate_target(&stmt["expr"], &mut env);
                         sum = sum.plus(Estimate::unknown(format!(
@@ -694,6 +783,48 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
         }
         match kind(expr) {
             "Expr_Closure" | "Expr_ArrowFunction" => Estimate::zero(),
+            "Expr_PropertyFetch" | "Expr_NullsafePropertyFetch" => {
+                let effect = self.expr(&expr["var"], class, file, env, stack);
+                effect.plus(self.property_effect(expr, false, class, file, env))
+            }
+            "Expr_Clone" => self
+                .expr(&expr["expr"], class, file, env, stack)
+                .plus(Estimate::unknown(format!("object clone hooks at {file}"))),
+            "Expr_BinaryOp_Concat" => {
+                let mut effect = self.expr(&expr["left"], class, file, env, stack);
+                let left = self.bound(&expr["left"], class, file, env);
+                effect = effect.plus(self.expr(&expr["right"], class, file, env, stack));
+                let right = self.bound(&expr["right"], class, file, env);
+                if left.scalar && right.scalar {
+                    effect
+                } else {
+                    effect.plus(Estimate::unknown(format!(
+                        "object string conversion at {file}"
+                    )))
+                }
+            }
+            "Expr_AssignOp_Concat" | "Scalar_InterpolatedString" => {
+                if kind(expr) == "Expr_AssignOp_Concat" {
+                    invalidate_target(&expr["var"], env);
+                }
+                Estimate::unknown(format!("string conversion hooks at {file}"))
+            }
+            "Expr_Cast_String" => {
+                let effect = self.expr(&expr["expr"], class, file, env, stack);
+                let value = self.bound(&expr["expr"], class, file, env);
+                if value.scalar {
+                    effect
+                } else {
+                    effect.plus(Estimate::unknown(format!(
+                        "object string conversion at {file}"
+                    )))
+                }
+            }
+            "Expr_YieldFrom" => {
+                let effect = self.expr(&expr["expr"], class, file, env, stack);
+                let value = self.bound(&expr["expr"], class, file, env);
+                effect.plus(self.consume(&value, stack, file))
+            }
             "Expr_BinaryOp_Pipe" => {
                 let sum = self.expr(&expr["left"], class, file, env, stack);
                 let argument = self.bound(&expr["left"], class, file, env);
@@ -719,6 +850,10 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
                     )));
                 }
                 let method = string(&expr["name"]["name"]);
+                if let Some(effect) = self.special_method(&target, method, &arguments, stack, file)
+                {
+                    return sum.plus(effect);
+                }
                 if method.eq_ignore_ascii_case("__invoke") && target.callable.is_some() {
                     let effect = self.invoke(target.callable.as_deref(), &arguments, stack, file);
                     return sum.plus(if kind(expr) == "Expr_NullsafeMethodCall" {
@@ -727,12 +862,16 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
                         effect
                     });
                 }
-                let Some(receiver) = target.object else {
+                let Some(receiver) = target.object.clone() else {
                     return sum.plus(Estimate::unknown(format!(
                         "unknown receiver for {method} at {file}:{}",
                         line(expr)
                     )));
                 };
+                let mut arguments = arguments;
+                let mut this = target.clone();
+                this.argument_name = Some("\0this".into());
+                arguments.push(this);
                 let effect = self.call(&receiver, method, file, stack, &arguments);
                 sum.plus(if kind(expr) == "Expr_NullsafeMethodCall" {
                     effect.branch(Estimate::zero())
@@ -789,7 +928,12 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
                 )))
             }
             "Expr_Assign" => {
-                let sum = self.expr(&expr["expr"], class, file, env, stack);
+                let mut sum = Estimate::zero();
+                if kind(&expr["var"]) == "Expr_PropertyFetch" {
+                    sum = sum.plus(self.expr(&expr["var"]["var"], class, file, env, stack));
+                    sum = sum.plus(self.property_effect(&expr["var"], true, class, file, env));
+                }
+                sum = sum.plus(self.expr(&expr["expr"], class, file, env, stack));
                 if kind(&expr["var"]) == "Expr_Variable" && expr["var"]["name"].is_string() {
                     let key = string(&expr["var"]["name"]).to_owned();
                     let bound = self.bound(&expr["expr"], class, file, env);
@@ -884,6 +1028,9 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
                     {
                         return sum.plus(self.function_bound(candidate, stack, &arguments));
                     }
+                }
+                if let Some(effect) = self.extended_builtin(expr, file, env, stack, &arguments) {
+                    return sum.plus(effect);
                 }
                 if let Some(effect) =
                     self.callback_builtin(expr, class, file, env, stack, &arguments)
@@ -991,6 +1138,38 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
         result
     }
     fn bound_inner(&mut self, node: &Value, class: &str, file: &str, env: &Scope) -> Bound {
+        if kind(node) == "Expr_PropertyFetch" && kind(&node["name"]) == "Identifier" {
+            let holder = self.bound(&node["var"], class, file, env);
+            if let Some(value) = holder
+                .properties
+                .as_ref()
+                .and_then(|props| props.get(string(&node["name"]["name"])))
+            {
+                return value.clone();
+            }
+        }
+        if kind(node) == "Expr_Assign" {
+            return if kind(&node["var"]) == "Expr_Variable" {
+                env.values
+                    .get(string(&node["var"]["name"]))
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                Bound::default()
+            };
+        }
+        if kind(node) == "Expr_Array" && contains_assignment(node) {
+            return Bound {
+                count: literal_count(node),
+                ..Bound::default()
+            };
+        }
+        if !first_class_callable(node)
+            && !contains_assignment(&node["args"])
+            && let Some(value) = self.special_bound(node, class, file, env)
+        {
+            return value;
+        }
         let constant =
             if kind(node) == "Expr_ClassConstFetch" && kind(&node["name"]) == "Identifier" {
                 self.class_name(&node["class"], class).map(|owner| {
@@ -1206,6 +1385,21 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
             count,
             scalar,
             element,
+            members: if safe_array_members(node) {
+                Some(std::sync::Arc::new(
+                    array(&node["items"])
+                        .iter()
+                        .map(|item| {
+                            let mut value = self.bound(&item["value"], class, file, env);
+                            value.argument_name = item["key"]["value"].as_str().map(str::to_owned);
+                            value
+                        })
+                        .collect(),
+                ))
+            } else {
+                None
+            },
+            ..Bound::default()
         }
     }
     fn class_name(&self, node: &Value, class: &str) -> Option<String> {
@@ -1228,7 +1422,18 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
     ) -> Estimate {
         match target {
             Some(Callable::Method(owner, method)) => {
-                self.call(owner, method, file, stack, arguments)
+                let mut arguments = arguments.to_vec();
+                if !arguments
+                    .iter()
+                    .any(|arg| arg.argument_name.as_deref() == Some("\0this"))
+                {
+                    arguments.push(Bound {
+                        object: Some(owner.clone()),
+                        argument_name: Some("\0this".into()),
+                        ..Bound::default()
+                    });
+                }
+                self.call(owner, method, file, stack, &arguments)
             }
             Some(Callable::Function(name)) => {
                 let builtin = name.to_ascii_lowercase();
@@ -1247,7 +1452,7 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
                 class,
                 file,
             }) => {
-                if has_yield(node) {
+                if has_yield(node) && !std::mem::take(&mut self.consume_generator) {
                     return Estimate::zero();
                 }
                 let key = format!("closure:{file}:{}", node["attributes"]["startFilePos"]);
@@ -1272,10 +1477,578 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
             None => Estimate::unknown(format!("unresolved callback invocation at {file}")),
         }
     }
-    fn callback_builtin(
+    fn property_effect(
+        &mut self,
+        node: &Value,
+        write: bool,
+        class: &str,
+        file: &str,
+        env: &Scope,
+    ) -> Estimate {
+        let Some(owner) = self.receiver(&node["var"], class, file, env) else {
+            return Estimate::unknown(format!("unresolved property hooks at {file}"));
+        };
+        let property = string(&node["name"]["name"]);
+        let mut current = Some(owner);
+        for _ in 0..48 {
+            let Some(owner) = current else {
+                break;
+            };
+            if self
+                .program
+                .property_hooks
+                .get(&owner)
+                .is_some_and(|names| names.iter().any(|name| name == property))
+                || self
+                    .program
+                    .method(&owner, if write { "__set" } else { "__get" })
+                    .is_some()
+                || self.program.method(&owner, "__isset").is_some()
+                || self.program.method(&owner, "__unset").is_some()
+            {
+                return Estimate::unknown(format!(
+                    "property or magic access hooks for {owner}::{property} at {file}"
+                ));
+            }
+            current = self.program.parent(&owner).cloned();
+        }
+        Estimate::zero()
+    }
+    fn selected_callable(
         &mut self,
         node: &Value,
         class: &str,
+        file: &str,
+        env: &Scope,
+    ) -> Option<Callable> {
+        match kind(node) {
+            "Expr_MethodCall" if kind(&node["name"]) == "Identifier" => self
+                .receiver(&node["var"], class, file, env)
+                .map(|owner| Callable::Method(owner, string(&node["name"]["name"]).into())),
+            "Expr_StaticCall" if kind(&node["name"]) == "Identifier" => self
+                .class_name(&node["class"], class)
+                .map(|owner| Callable::Method(owner, string(&node["name"]["name"]).into())),
+            "Expr_FuncCall" if is_name(&node["name"]) => {
+                let ns = name(&node["name"]["attributes"]["namespacedName"]);
+                Some(Callable::Function(
+                    if self
+                        .program
+                        .functions
+                        .contains_key(&ns.to_ascii_lowercase())
+                    {
+                        ns
+                    } else {
+                        name(&node["name"])
+                    },
+                ))
+            }
+            "Expr_FuncCall" => self
+                .bound(&node["name"], class, file, env)
+                .callable
+                .map(|c| (*c).clone()),
+            _ => None,
+        }
+    }
+    fn callable_yields(&self, target: &Callable) -> bool {
+        match target {
+            Callable::Method(owner, method) => self
+                .program
+                .method(owner, method)
+                .is_some_and(|m| has_yield(m.node)),
+            Callable::Function(name) => self
+                .program
+                .functions
+                .get(&name.to_ascii_lowercase())
+                .is_some_and(|m| has_yield(&m["node"])),
+            Callable::Closure { node, .. } => has_yield(node),
+        }
+    }
+    fn special_bound(
+        &mut self,
+        node: &Value,
+        class: &str,
+        file: &str,
+        env: &Scope,
+    ) -> Option<Bound> {
+        if let Some(target) = self.selected_callable(node, class, file, env)
+            && self.callable_yields(&target)
+        {
+            return Some(Bound {
+                object: Some("Generator".into()),
+                deferred: Some(std::sync::Arc::new(Deferred {
+                    target,
+                    arguments: self.bound_args(node, class, file, env),
+                })),
+                ..Bound::default()
+            });
+        }
+        if ["Expr_StaticCall", "Expr_MethodCall"].contains(&kind(node)) {
+            let method = string(&node["name"]["name"]).to_ascii_lowercase();
+            let args = self.bound_args(node, class, file, env);
+            let target = if kind(node) == "Expr_StaticCall"
+                && self
+                    .class_name(&node["class"], class)
+                    .is_some_and(|c| c.eq_ignore_ascii_case("Closure"))
+                && method == "bind"
+            {
+                argument(&args, 0, "closure").cloned()
+            } else if kind(node) == "Expr_MethodCall" && method == "bindto" {
+                Some(self.bound(&node["var"], class, file, env))
+            } else {
+                None
+            };
+            if let Some(target) = target {
+                let position = usize::from(kind(node) == "Expr_StaticCall");
+                if argument(&args, position + 1, "newScope").is_some() {
+                    return Some(Bound::default());
+                }
+                return Some(self.rebind(&target, argument(&args, position, "newThis"), false));
+            }
+        }
+        if kind(node) == "Expr_New" {
+            let owner = self.class_name(&node["class"], class)?;
+            let args = self.bound_args(node, class, file, env);
+            let reflection = if owner.eq_ignore_ascii_case("ReflectionFunction") {
+                argument(&args, 0, "function").and_then(|v| v.callable.clone())
+            } else if owner.eq_ignore_ascii_case("ReflectionMethod") {
+                let first = &node["args"][0]["value"];
+                let ty = argument(&args, 0, "objectOrMethod")
+                    .and_then(|v| v.object.clone())
+                    .or_else(|| {
+                        if kind(first) == "Scalar_String" {
+                            Some(string(&first["value"]).into())
+                        } else if kind(first) == "Expr_ClassConstFetch" {
+                            self.class_name(&first["class"], class)
+                        } else {
+                            None
+                        }
+                    });
+                ty.and_then(|ty| {
+                    node["args"][1]["value"]["value"]
+                        .as_str()
+                        .map(|name| std::sync::Arc::new(Callable::Method(ty, name.into())))
+                })
+            } else {
+                let constructor = self.program.method(&owner, "__construct")?;
+                if !array(&constructor.node["stmts"]).is_empty() {
+                    return None;
+                }
+                let mut properties = BTreeMap::new();
+                for (index, param) in array(&constructor.node["params"]).iter().enumerate() {
+                    if param["flags"].as_i64().unwrap_or(0) & 64 == 0 {
+                        continue;
+                    }
+                    let key = string(&param["var"]["name"]);
+                    if let Some(value) = argument(&args, index, key) {
+                        properties.insert(key.to_owned(), value.clone());
+                    }
+                }
+                return Some(Bound {
+                    object: Some(owner),
+                    properties: Some(std::sync::Arc::new(properties)),
+                    ..Bound::default()
+                });
+            };
+            return Some(Bound {
+                object: Some(owner),
+                reflection,
+                ..Bound::default()
+            });
+        }
+        None
+    }
+    fn rebind(&self, target: &Bound, receiver: Option<&Bound>, change_scope: bool) -> Bound {
+        if let Some(Callable::Closure {
+            node,
+            scope,
+            class,
+            file,
+        }) = target.callable.as_deref()
+            && node["static"] != true
+        {
+            let mut scope = scope.clone();
+            scope.remove("this");
+            scope.values.remove("this");
+            if let Some(receiver) = receiver
+                && let Some(ty) = &receiver.object
+            {
+                scope.insert("this".into(), ty.clone());
+            }
+            return Bound {
+                callable: Some(std::sync::Arc::new(Callable::Closure {
+                    node: node.clone(),
+                    scope,
+                    class: if change_scope {
+                        receiver.and_then(|v| v.object.clone()).unwrap_or_default()
+                    } else {
+                        class.clone()
+                    },
+                    file: file.clone(),
+                })),
+                ..Bound::default()
+            };
+        }
+        Bound::default()
+    }
+    fn special_method(
+        &mut self,
+        target: &Bound,
+        method: &str,
+        args: &[Bound],
+        stack: &[String],
+        file: &str,
+    ) -> Option<Estimate> {
+        if target.callable.is_some() {
+            if method.eq_ignore_ascii_case("bindTo") {
+                return Some(Estimate::zero());
+            }
+            if method.eq_ignore_ascii_case("call") {
+                let rebound = self.rebind(target, argument(args, 0, "newThis"), true);
+                return Some(self.invoke(
+                    rebound.callable.as_deref(),
+                    args.get(1..).unwrap_or(&[]),
+                    stack,
+                    file,
+                ));
+            }
+        }
+        if let Some(callback) = target.reflection.as_deref() {
+            let offset = usize::from(
+                target
+                    .object
+                    .as_deref()
+                    .is_some_and(|c| c.eq_ignore_ascii_case("ReflectionMethod")),
+            );
+            let mut values = if method.eq_ignore_ascii_case("invoke") {
+                args.get(offset..).unwrap_or(&[]).to_vec()
+            } else if method.eq_ignore_ascii_case("invokeArgs") {
+                argument(args, offset, "args")
+                    .and_then(|v| v.members.as_deref())
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        vec![Bound {
+                            argument_name: Some("*".into()),
+                            ..Bound::default()
+                        }]
+                    })
+            } else {
+                return None;
+            };
+            if offset == 1
+                && let Some(receiver) = argument(args, 0, "object")
+            {
+                let mut receiver = receiver.clone();
+                receiver.argument_name = Some("\0this".into());
+                values.push(receiver);
+            }
+            return Some(self.invoke(Some(callback), &values, stack, file));
+        }
+        None
+    }
+    fn consume(&mut self, value: &Bound, stack: &[String], file: &str) -> Estimate {
+        if let Some(deferred) = &value.deferred {
+            if self
+                .consumed
+                .iter()
+                .any(|seen| std::sync::Arc::ptr_eq(seen, deferred))
+            {
+                return Estimate::unknown(format!(
+                    "generator already consumed or advanced at {file}"
+                ));
+            }
+            self.consumed.push(deferred.clone());
+            self.consume_generator = true;
+            let effect = self.invoke(Some(&deferred.target), &deferred.arguments, stack, file);
+            self.consume_generator = false;
+            return effect;
+        }
+        if value.members.is_some() || value.count.is_some() {
+            return Estimate::zero();
+        }
+        Estimate::unknown(format!("unresolved iterator execution at {file}"))
+    }
+    fn repeated_callback(
+        &mut self,
+        target: Option<&Callable>,
+        args: &[Bound],
+        builtin: &str,
+        stack: &[String],
+        file: &str,
+    ) -> Estimate {
+        self.uncertain_callback += 1;
+        let mut effect = self.invoke(target, args, stack, file);
+        self.uncertain_callback -= 1;
+        if effect.upper != Some(0) || !effect.unknown.is_empty() {
+            effect.lower = 0;
+            effect.upper = None;
+            effect = effect.plus(Estimate::unknown(format!(
+                "unknown callback invocation count for {builtin} at {file}"
+            )));
+        }
+        effect
+    }
+    fn recursive_walk(
+        &mut self,
+        value: &Bound,
+        callback: Option<&Callable>,
+        extra: &Bound,
+        stack: &[String],
+        file: &str,
+    ) -> Estimate {
+        let mut extra = extra.clone();
+        extra.argument_name = None;
+        if let Some(members) = &value.members {
+            let mut result = Estimate::zero();
+            for member in members.iter() {
+                result = result.plus(if member.members.is_some() {
+                    self.recursive_walk(member, callback, &extra, stack, file)
+                } else if !member.scalar && member.object.is_none() {
+                    self.repeated_callback(
+                        callback,
+                        &[
+                            Bound::default(),
+                            Bound {
+                                scalar: true,
+                                ..Bound::default()
+                            },
+                            extra.clone(),
+                        ],
+                        "array_walk_recursive",
+                        stack,
+                        file,
+                    )
+                } else {
+                    self.uncertain_callback += 1;
+                    let mut member = member.clone();
+                    member.argument_name = None;
+                    let effect = self.invoke(
+                        callback,
+                        &[
+                            member,
+                            Bound {
+                                scalar: true,
+                                ..Bound::default()
+                            },
+                            extra.clone(),
+                        ],
+                        stack,
+                        file,
+                    );
+                    self.uncertain_callback -= 1;
+                    effect
+                });
+            }
+            result
+        } else {
+            self.repeated_callback(
+                callback,
+                &[
+                    Bound::default(),
+                    Bound {
+                        scalar: true,
+                        ..Bound::default()
+                    },
+                    extra.clone(),
+                ],
+                "array_walk_recursive",
+                stack,
+                file,
+            )
+        }
+    }
+    fn extended_builtin(
+        &mut self,
+        node: &Value,
+        file: &str,
+        env: &mut Scope,
+        stack: &[String],
+        args: &[Bound],
+    ) -> Option<Estimate> {
+        let builtin = name(&node["name"]).to_ascii_lowercase();
+        if kind(&node["name"]) != "Name_FullyQualified"
+            && name(&node["name"]["attributes"]["namespacedName"]).contains('\\')
+        {
+            return None;
+        }
+        let sort = ["usort", "uasort", "uksort"].contains(&builtin.as_str());
+        let compare = [
+            "array_udiff",
+            "array_udiff_assoc",
+            "array_udiff_uassoc",
+            "array_uintersect",
+            "array_uintersect_assoc",
+            "array_uintersect_uassoc",
+            "array_diff_uassoc",
+            "array_diff_ukey",
+            "array_intersect_uassoc",
+            "array_intersect_ukey",
+        ]
+        .contains(&builtin.as_str());
+        let registration = [
+            "register_shutdown_function",
+            "set_error_handler",
+            "set_exception_handler",
+            "spl_autoload_register",
+        ]
+        .contains(&builtin.as_str());
+        if !(sort
+            || compare
+            || registration
+            || [
+                "array_walk_recursive",
+                "preg_replace_callback",
+                "preg_replace_callback_array",
+                "iterator_apply",
+                "iterator_count",
+                "iterator_to_array",
+            ]
+            .contains(&builtin.as_str()))
+        {
+            return None;
+        }
+        if args.iter().any(|a| a.argument_name.as_deref() == Some("*")) {
+            return Some(Estimate::unknown(format!(
+                "unresolved callback arguments to {builtin}"
+            )));
+        }
+        if registration {
+            return Some(Estimate::unknown(format!(
+                "deferred callback registration via {builtin} at {file}"
+            )));
+        }
+        let empty = Bound::default();
+        let first = argument(
+            args,
+            0,
+            if builtin.starts_with("iterator_") {
+                "iterator"
+            } else {
+                "array"
+            },
+        )
+        .unwrap_or(&empty);
+        if sort || builtin == "array_walk_recursive" {
+            for (index, arg) in array(&node["args"]).iter().enumerate() {
+                if (index == 0 && arg["name"].is_null()) || arg["name"]["name"] == "array" {
+                    invalidate_target(&arg["value"], env);
+                }
+            }
+        }
+        if builtin == "iterator_count" || builtin == "iterator_to_array" {
+            return Some(self.consume(first, stack, file));
+        }
+        if builtin == "iterator_apply" {
+            let mut effect = self.consume(first, stack, file);
+            effect.lower = 0;
+            let values = argument(args, 2, "args")
+                .and_then(|a| a.members.as_deref())
+                .cloned()
+                .unwrap_or_default();
+            return Some(effect.plus(self.repeated_callback(
+                argument(args, 1, "callback").and_then(|a| a.callable.as_deref()),
+                &values,
+                &builtin,
+                stack,
+                file,
+            )));
+        }
+        if builtin == "array_walk_recursive" {
+            return Some(self.recursive_walk(
+                first,
+                argument(args, 1, "callback").and_then(|a| a.callable.as_deref()),
+                argument(args, 2, "arg").unwrap_or(&empty),
+                stack,
+                file,
+            ));
+        }
+        if sort {
+            if first.count.is_some_and(|n| n < 2) {
+                return Some(Estimate::zero());
+            }
+            let value = if builtin == "uksort" {
+                Bound {
+                    scalar: true,
+                    ..Bound::default()
+                }
+            } else {
+                first.element.as_deref().cloned().unwrap_or_default()
+            };
+            return Some(self.repeated_callback(
+                argument(args, 1, "callback").and_then(|a| a.callable.as_deref()),
+                &[value.clone(), value],
+                &builtin,
+                stack,
+                file,
+            ));
+        }
+        if compare {
+            let count = if builtin.ends_with("_uassoc")
+                && (builtin.starts_with("array_udiff") || builtin.starts_with("array_uintersect"))
+            {
+                2
+            } else {
+                1
+            };
+            let mut effect = Estimate::zero();
+            for target in args.iter().skip(args.len().saturating_sub(count)) {
+                effect = effect.plus(self.repeated_callback(
+                    target.callable.as_deref(),
+                    &[Bound::default(), Bound::default()],
+                    &builtin,
+                    stack,
+                    file,
+                ));
+            }
+            if args
+                .iter()
+                .take(args.len().saturating_sub(count))
+                .any(|a| a.count != Some(0) && !a.element.as_deref().is_some_and(|v| v.scalar))
+            {
+                effect = effect.plus(Estimate::unknown(format!(
+                    "opaque comparison values for {builtin} at {file}"
+                )));
+            }
+            return Some(effect);
+        }
+        if builtin == "preg_replace_callback_array" {
+            let callbacks = argument(args, 0, "pattern").and_then(|v| v.members.as_deref());
+            let Some(callbacks) = callbacks else {
+                return Some(Estimate::unknown(format!(
+                    "unresolved callback map for {builtin} at {file}"
+                )));
+            };
+            let mut effect = Estimate::zero();
+            for callback in callbacks {
+                effect = effect.plus(self.repeated_callback(
+                    callback.callable.as_deref(),
+                    &[Bound::default()],
+                    &builtin,
+                    stack,
+                    file,
+                ));
+            }
+            return Some(effect.plus(Estimate::unknown(format!(
+                "regular expression callback result conversion at {file}"
+            ))));
+        }
+        Some(
+            self.repeated_callback(
+                argument(args, 1, "callback").and_then(|a| a.callable.as_deref()),
+                &[Bound::default()],
+                &builtin,
+                stack,
+                file,
+            )
+            .plus(Estimate::unknown(format!(
+                "regular expression callback result conversion at {file}"
+            ))),
+        )
+    }
+
+    fn callback_builtin(
+        &mut self,
+        node: &Value,
+        _class: &str,
         file: &str,
         env: &mut Scope,
         stack: &[String],
@@ -1332,24 +2105,17 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
             return Some(self.invoke(target, arguments.get(1..).unwrap_or(&[]), stack, file));
         }
         if builtin == "call_user_func_array" {
-            let values = &node["args"][1]["value"];
-            let args = if kind(values) == "Expr_Array"
-                && !contains_assignment(values)
-                && array(&values["items"])
-                    .iter()
-                    .all(|item| item["unpack"] != true && item["key"].is_null())
-            {
-                array(&values["items"])
-                    .iter()
-                    .map(|item| self.bound(&item["value"], class, file, env))
-                    .collect()
-            } else {
-                vec![Bound {
-                    argument_name: Some("*".into()),
-                    ..Bound::default()
-                }]
-            };
-            return Some(self.invoke(target, &args, stack, file));
+            let values = arguments
+                .get(1)
+                .and_then(|v| v.members.as_deref())
+                .cloned()
+                .unwrap_or_else(|| {
+                    vec![Bound {
+                        argument_name: Some("*".into()),
+                        ..Bound::default()
+                    }]
+                });
+            return Some(self.invoke(target, &values, stack, file));
         }
         if builtin == "array_filter" && arguments.len() < 2 {
             return Some(Estimate::zero());
@@ -1442,7 +2208,7 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
                     && expr["var"]["name"] == "this"
                     && kind(&expr["name"]) == "Identifier" =>
             {
-                let mut owner = class.to_owned();
+                let mut owner = env.get("this")?.clone();
                 for _ in 0..48 {
                     if let Some(properties) = self.program.properties.get(&owner)
                         && let Some(ty) = properties.get(string(&expr["name"]["name"]))
@@ -1621,7 +2387,9 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
         stack: &[String],
         arguments: &[Bound],
     ) -> Estimate {
-        if receiver.eq_ignore_ascii_case("Closure") && method.eq_ignore_ascii_case("fromCallable") {
+        if receiver.eq_ignore_ascii_case("Closure")
+            && ["fromcallable", "bind"].contains(&method.to_ascii_lowercase().as_str())
+        {
             return Estimate::zero();
         }
         let api = self.program.api_type(receiver);
@@ -1865,6 +2633,31 @@ fn normalize_bound_arguments(values: &[Bound], builtin: &str) -> Vec<Bound> {
     }
     result
 }
+fn safe_array_members(node: &Value) -> bool {
+    if kind(node) != "Expr_Array" {
+        return false;
+    }
+    let mut keys = Vec::new();
+    for item in array(&node["items"]) {
+        if item["unpack"] == true || item["byRef"] == true {
+            return false;
+        }
+        if !item["key"].is_null() {
+            let Some(key) = item["key"]["value"].as_str() else {
+                return false;
+            };
+            if kind(&item["key"]) != "Scalar_String"
+                || key.parse::<f64>().is_ok()
+                || keys.contains(&key)
+            {
+                return false;
+            }
+            keys.push(key);
+        }
+    }
+    true
+}
+
 fn contains_assignment(node: &Value) -> bool {
     if ["Expr_Closure", "Expr_ArrowFunction"].contains(&kind(node)) {
         return false;
@@ -2161,6 +2954,50 @@ impl Program {
             if class.is_empty() {
                 continue;
             }
+            if ["Stmt_Class", "Stmt_Interface"].contains(&kind(declaration)) {
+                let mut compact = Value::Object(
+                    declaration
+                        .as_object()
+                        .unwrap()
+                        .iter()
+                        .filter(|(key, _)| key.as_str() != "stmts")
+                        .map(|(key, value)| (key.clone(), value.clone()))
+                        .collect(),
+                );
+                let methods = array(&declaration["stmts"])
+                    .iter()
+                    .filter(|member| kind(member) == "Stmt_ClassMethod")
+                    .map(|member| {
+                        let mut method = Value::Object(
+                            member
+                                .as_object()
+                                .unwrap()
+                                .iter()
+                                .filter(|(key, _)| key.as_str() != "stmts")
+                                .map(|(key, value)| (key.clone(), value.clone()))
+                                .collect(),
+                        );
+                        if !string(&member["name"]["name"])
+                            .eq_ignore_ascii_case("getSubscribedEvents")
+                        {
+                            method["stmts"] = json!([]);
+                        } else {
+                            method["stmts"] = member["stmts"].clone();
+                        }
+                        method
+                    })
+                    .collect::<Vec<_>>();
+                compact["stmts"] = json!(methods);
+                let key = class.to_ascii_lowercase();
+                match self.framework_classes.entry(key) {
+                    std::collections::btree_map::Entry::Occupied(mut entry) => {
+                        entry.get_mut()["duplicate"] = json!(true);
+                    }
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(json!({"name":class,"file":file,"node":compact}));
+                    }
+                }
+            }
             if kind(declaration) == "Stmt_Interface" {
                 self.interfaces.insert(
                     class.clone(),
@@ -2324,6 +3161,36 @@ impl Program {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn framework_hook_metadata_uses_indexed_ancestry_and_compact_methods() {
+        let source = r#"<?php namespace Neutral;
+            abstract class Base implements \Symfony\Component\Messenger\Middleware\MiddlewareInterface {}
+            abstract class Middle extends Base {}
+            final class Worker extends Middle { public function handle(): void { $unrelated = 42; } }
+            final class Ordinary { public function run(): void {} }
+            #[\Symfony\Component\EventDispatcher\Attribute\AsEventListener(method: 'receive')]
+            final class Listener { public function receive(): void { $unrelated = 42; } }
+        "#;
+        let mut program = Program::default();
+        program.index_source(
+            crate::syntax::parse(source).unwrap(),
+            "fixture.php",
+            &Env::new(),
+            &BTreeMap::new(),
+        );
+        let records = program.framework_hook_classes(&[
+            "Symfony\\Component\\Messenger\\Middleware\\MiddlewareInterface".into(),
+            "Symfony\\Component\\EventDispatcher\\Attribute\\AsEventListener".into(),
+        ]);
+        assert_eq!(records.len(), 4);
+        assert!(!records.iter().any(|r| r["name"] == "Neutral\\Ordinary"));
+        for record in records {
+            for method in array(&record["node"]["stmts"]) {
+                assert!(array(&method["stmts"]).is_empty());
+            }
+        }
+    }
+
     #[test]
     fn forwarding_endpoints_are_not_recursive() {
         let source = r#"<?php
@@ -2548,6 +3415,39 @@ mod tests {
             cycle.cycles,
             ["callbackeffects\\effectscontroller::directcycle"]
         );
+    }
+
+    #[test]
+    fn php_consumers_follow_execution_and_defer_registration() {
+        let source = include_str!("../tests/fixtures/php-consumers.php");
+        let mut program = Program::default();
+        program.index_source(
+            crate::syntax::parse(source).unwrap(),
+            "Consumers.php",
+            &Env::new(),
+            &BTreeMap::new(),
+        );
+        for row in source
+            .lines()
+            .filter_map(|row| row.trim().strip_prefix("// budget: "))
+        {
+            let cells: Vec<_> = row.split_whitespace().collect();
+            let lower = cells[1].parse::<i64>().unwrap();
+            let upper = cells[2].parse::<i64>().ok();
+            let result = Evaluator::new(&program, false, |_, _| Value::Null).method(
+                "PhpConsumers\\ConsumersController",
+                cells[0],
+                &[],
+            );
+            assert_eq!(
+                (result.lower, result.upper),
+                (lower, upper),
+                "{}: {:?}",
+                cells[0],
+                result
+            );
+            assert!(result.cycles.is_empty(), "{}: {:?}", cells[0], result);
+        }
     }
 
     #[test]

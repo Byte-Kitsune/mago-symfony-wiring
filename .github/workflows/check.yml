@@ -63,6 +63,7 @@ jobs:
         if: matrix.target != ''
         run: sh tests/alpine-native-smoke.sh
       - run: find src tests -name '*.php' -exec php -l {} \;
+      - run: php tests/framework-hook-tags.php
       - run: sh tests/smoke.sh
       - name: Compare complete PHP and Rust reports
         if: matrix.backend == 'rust'
