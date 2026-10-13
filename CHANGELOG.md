@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1 — 2026-10-13
+
+- Add Linux aarch64/arm64 release binaries and SHA-256 checksums, with automatic shared-cache installation.
+- Build and run the complete extension fixture suite on native Linux ARM runners with minimum and latest supported Mago; validate uploaded executable architecture.
+- Preserve engine 0.3.0 and existing analysis behavior; use the stable Architecture Graph 1.3.1 assets for shared downloads.
+
 ## 1.2.0 — 2026-10-13
 
 - Publish the tested RC3 functionality as a stable release with Rust engine 0.3.0 as the default computational backend.

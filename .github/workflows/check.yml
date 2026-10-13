@@ -13,6 +13,8 @@ jobs:
           - {mago: "^1.50", backend: php, runner: ubuntu-latest, asset: linux-x86_64}
           - {mago: "1.50.0", backend: rust, runner: ubuntu-latest, asset: linux-x86_64}
           - {mago: "^1.50", backend: rust, runner: ubuntu-latest, asset: linux-x86_64}
+          - {mago: "1.50.0", backend: rust, runner: ubuntu-22.04-arm, asset: linux-arm64}
+          - {mago: "^1.50", backend: rust, runner: ubuntu-22.04-arm, asset: linux-arm64}
           - {mago: "^1.50", backend: rust, runner: macos-15, asset: macos-arm64}
           - {mago: "^1.50", backend: rust, runner: macos-15-intel, asset: macos-x86_64}
     steps:
@@ -35,6 +37,7 @@ jobs:
       - name: Verify native default and runtime behavior
         if: matrix.backend == 'rust'
         run: |
+          php tests/assert-native-platform.php
           php tests/assert-native-runtime.php
           php tests/assert-native-trace-path.php
           php tests/assert-native-install.php
@@ -48,6 +51,7 @@ jobs:
         run: |
           mkdir -p release-assets
           cp native/target/release/mago-extension-engine release-assets/mago-extension-engine-${{ matrix.asset }}
+          python3 tests/assert-native-binary.py "${{ matrix.asset }}" "release-assets/mago-extension-engine-${{ matrix.asset }}"
       - uses: actions/upload-artifact@v4
         if: matrix.backend == 'rust' && matrix.mago == '^1.50'
         with:

@@ -8,7 +8,7 @@ namespace ByteKitsune\MagoNative;
 final class Runtime
 {
     public const VERSION = '0.3.0';
-    private const RELEASE = 'https://github.com/Byte-Kitsune/mago-architecture-graph/releases/download/v1.3.0/';
+    private const RELEASE = 'https://github.com/Byte-Kitsune/mago-architecture-graph/releases/download/v1.3.1/';
 
     public static function executable(): string
     {
@@ -22,17 +22,21 @@ final class Runtime
 
     public static function platform(): string
     {
-        $os = match (PHP_OS_FAMILY) {
+        return self::platformIdentifier(PHP_OS_FAMILY, php_uname('m'));
+    }
+
+    private static function platformIdentifier(string $osFamily, string $machine): string
+    {
+        $os = match ($osFamily) {
             'Linux' => 'linux',
             'Darwin' => 'macos',
             default => throw new \RuntimeException('Native engine does not support this operating system yet.'),
         };
-        $arch = match (strtolower(php_uname('m'))) {
+        $arch = match (strtolower($machine)) {
             'x86_64', 'amd64' => 'x86_64',
             'arm64', 'aarch64' => 'arm64',
             default => throw new \RuntimeException('Unsupported native engine CPU architecture.'),
         };
-        if ($os === 'linux' && $arch !== 'x86_64') throw new \RuntimeException('Linux arm64 binaries are not available yet; set MAGO_NATIVE_ENGINE to a source build.');
         return $os . '-' . $arch;
     }
 
