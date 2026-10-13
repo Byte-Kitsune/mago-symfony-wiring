@@ -9,7 +9,7 @@ use Mago\Sdk\Extension;
 
 final class SymfonyWiringExtension
 {
-    public const VERSION = '1.2.2';
+    public const VERSION = '1.3.0-RC1';
     /** @param list<string> $serviceFiles Explicit, ordered checkout-relative shared/dev files. */
     public static function create(string $projectRoot, array $serviceFiles): Extension
     {
