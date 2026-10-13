@@ -205,11 +205,11 @@ Output is the JSON report described above. Exit codes: `0` clean within the supp
 
 ## Native computational backend
 
-An opt-in Rust backend is available on this development branch. It preserves
-the existing Mago PHP worker and configuration API. Build with
-`cargo build --release --locked --manifest-path native/Cargo.toml` and set
-`MAGO_NATIVE_ENGINE` to that executable before running Mago.
+Rust is the default computational backend on this development branch. The
+version-matched PHP SDK adapter remains. Missing native binaries are installed
+from the platform release asset into a shared cache after checksum verification.
+Linux x86_64 and both macOS architectures are covered by native-mode CI.
 
-See [native backend details](NATIVE_BACKEND.md) for migrated components,
-compatibility fallback and validation. This does not change the default backend
-of the previously published releases.
+See [native backend details](NATIVE_BACKEND.md) for offline installation, source
+builds, explicit reference-backend comparisons and the pending project-specific
+recursion investigation.

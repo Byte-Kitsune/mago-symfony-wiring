@@ -17,11 +17,13 @@ for config in sorted((root / 'tests').glob('*/mago.toml')):
     for backend in ['php', 'rust']:
         env = dict(os.environ)
         env.pop('MAGO_NATIVE_ENGINE', None)
+        env['MAGO_EXTENSION_BACKEND'] = backend
         if backend == 'rust':
             env['MAGO_NATIVE_ENGINE'] = binary
             env['MAGO_NATIVE_STRICT'] = '1'
         if os.environ.get('MAGO_TEST_DOCKER') == '1':
             invocation = ['docker', 'run', '--rm', '-v', f'{root}:/work', '-v', f'{binary}:/engine:ro', '-w', '/work/' + str(config.parent.relative_to(root))]
+            invocation += ['-e', 'MAGO_EXTENSION_BACKEND=' + backend]
             if backend == 'rust': invocation += ['-e', 'MAGO_NATIVE_ENGINE=/engine', '-e', 'MAGO_NATIVE_STRICT=1']
             invocation += ['--entrypoint', '/work/vendor/bin/mago', 't3code-monolith-sandbox:php8.5-mago1.53', 'analyze', '--reporting-format', 'json', '--minimum-report-level', 'note']
         else:

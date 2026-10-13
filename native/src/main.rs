@@ -40,6 +40,10 @@ type ProjectSession = (
 );
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("mago-extension-engine {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     let mut cache: HashMap<[u8; 32], (Value, usize)> = HashMap::new();
     let mut bytes = 0usize;
     let mut hits = 0usize;
@@ -59,6 +63,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             json!({"error":"Request exceeds transport limit or is truncated."})
         } else {
             match serde_json::from_str::<Request>(&line) {
+                Ok(request) if request.op == "info" => {
+                    json!({"schema":"1","result":{"version":env!("CARGO_PKG_VERSION"),"protocol":"1"}})
+                }
                 Ok(request) if request.op == "ast" => {
                     let source = request.source.ok_or("Missing AST source")?;
                     match mago_extension_engine::syntax::parse(&source) {
@@ -221,6 +228,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &[],
                         )
                     };
+                    if std::env::var("MAGO_NATIVE_TRACE").as_deref() == Ok("1") {
+                        for path in &evaluator.recursion_paths {
+                            eprintln!("native-recursion-trace: {}", serde_json::to_string(path)?);
+                        }
+                    }
                     json!({"schema":"1","result":estimate})
                 }
                 Ok(request) if request.op == "cycles" => {

@@ -187,6 +187,7 @@ impl Program {
 pub struct Evaluator<'a, F: FnMut(&str, &Value) -> Value> {
     program: &'a Program,
     visits: usize,
+    pub recursion_paths: Vec<Vec<String>>,
     assume_scalar: bool,
     callback: F,
 }
@@ -195,6 +196,7 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
         Self {
             program,
             visits: 0,
+            recursion_paths: Vec::new(),
             assume_scalar,
             callback,
         }
@@ -215,6 +217,8 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
                     "guarded recursion has unknown invocation bound: {key}"
                 ));
             }
+            self.recursion_paths
+                .push(stack.iter().cloned().chain([key.clone()]).collect());
             return Estimate {
                 lower: 0,
                 upper: None,
@@ -256,6 +260,8 @@ impl<'a, F: FnMut(&str, &Value) -> Value> Evaluator<'a, F> {
                     "guarded recursion has unknown invocation bound: {key}"
                 ));
             }
+            self.recursion_paths
+                .push(stack.iter().cloned().chain([key.clone()]).collect());
             return Estimate {
                 lower: 0,
                 upper: None,
@@ -1085,6 +1091,58 @@ impl Program {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn forwarding_endpoints_are_not_recursive() {
+        let source = r#"<?php
+        namespace Sample;
+        interface DetailsPort { public function fetch(): int; }
+        final class DetailsService implements DetailsPort {
+            public function fetch(): int { return 1; }
+        }
+        final class ForwardingEndpoint {
+            public function __construct(private readonly DetailsPort $details) {}
+            public function get(): int { return $this->details->fetch(); }
+        }
+        final class AssignedEndpoint {
+            private DetailsPort $details;
+            public function __construct(DetailsPort $details) { $this->details = $details; }
+            public function get(): int { return $this->details->fetch(); }
+        }
+        final class ChainedEndpoint {
+            public function get(): int { return (new DetailsService())->fetch(); }
+        }
+        final class RecursiveEndpoint {
+            public function get(): int { return $this->get(); }
+        }
+        "#;
+        let mut program = Program::default();
+        let bindings = Env::from([(
+            "Sample\\DetailsPort".into(),
+            "Sample\\DetailsService".into(),
+        )]);
+        program.index_source(
+            crate::syntax::parse(source).unwrap(),
+            "Endpoint.php",
+            &bindings,
+            &BTreeMap::new(),
+        );
+        for owner in ["ForwardingEndpoint", "AssignedEndpoint", "ChainedEndpoint"] {
+            let result = Evaluator::new(&program, false, |_, _| Value::Null).method(
+                &format!("Sample\\{owner}"),
+                "get",
+                &[],
+            );
+            assert!(result.cycles.is_empty(), "{owner}: {result:?}");
+            assert_eq!(result.upper, Some(0), "{owner}: {result:?}");
+        }
+        let recursive = Evaluator::new(&program, false, |_, _| Value::Null).method(
+            "Sample\\RecursiveEndpoint",
+            "get",
+            &[],
+        );
+        assert_eq!(recursive.cycles, ["sample\\recursiveendpoint::get"]);
+    }
+
     #[test]
     fn arithmetic_is_bounded_and_unknown_propagates() {
         let huge = Estimate {
