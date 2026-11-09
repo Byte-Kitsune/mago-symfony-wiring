@@ -216,4 +216,4 @@ recursion investigation.
 
 ## Framework callbacks
 
-Preserve sanitized compiled hook tags in optional container schema 3, retain schema 2 compatibility, and expose exact hook method targets plus registration uncertainty. The source-snapshot API is `inspectFrameworkHooks($analysis)`. Hook declarations do not prove request activation. All engine-0.4.0 companion packages must be updated together. See [callback coverage](https://github.com/Byte-Kitsune/mago-doctrine-query-budget/blob/feat/callback-effects-engine-0.4/CALLBACK_COVERAGE.md) for supported families and conservative limits.
+Preserve sanitized compiled hook tags in optional container schema 3, retain schema 2 compatibility, and expose exact hook method targets plus registration uncertainty. The source-snapshot API is `inspectFrameworkHooks($analysis)`. Hook declarations do not prove request activation. All engine-0.4.0 companion packages must be updated together. See [callback coverage](https://github.com/Byte-Kitsune/mago-doctrine-query-budget/blob/main/CALLBACK_COVERAGE.md) for supported families and conservative limits.
