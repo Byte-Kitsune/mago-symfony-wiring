@@ -56,4 +56,4 @@ Higher-order execution through `array_map` currently has an unknown query bound 
 
 ## Engine 0.4.0
 
-The shared kernel is synchronized with Doctrine Query Budget callback-effects improvements. Engine 0.4.0 binaries and SHA-256 checksums are downloaded from Architecture Graph v1.4.0-RC1 into a separate cache; `MAGO_NATIVE_ENGINE` remains an explicit override. All adapters in a shared worker must use engine 0.4.0.
+The shared kernel is synchronized with Doctrine Query Budget callback-effects improvements. Engine 0.4.0 binaries and SHA-256 checksums are downloaded from Architecture Graph v1.4.0 into a separate cache; `MAGO_NATIVE_ENGINE` remains an explicit override. All adapters in a shared worker must use engine 0.4.0.
