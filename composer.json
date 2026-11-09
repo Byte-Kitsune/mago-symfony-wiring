@@ -7,7 +7,7 @@
     "php": "^8.2",
     "carthage-software/mago": "^1.50",
     "nikic/php-parser": "^5.9",
-    "symfony/yaml": "^7.4 || ^8.0"
+    "symfony/yaml": "^7.4.23 || ^8.1.11"
   },
   "autoload": {
     "psr-4": { "ByteKitsune\\MagoSymfonyWiring\\": "src/" }
@@ -20,7 +20,7 @@
     }
   },
   "require-dev": {
-    "symfony/config": "^7.4",
+    "symfony/config": "^7.4.23",
     "symfony/dependency-injection": "^7.4"
   }
 }
