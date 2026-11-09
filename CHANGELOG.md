@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 — 2026-11-09
+
+- Publish the 1.3.0-RC1 functionality as a stable release: sanitized compiled hook tags in container schema 3, exact hook method targets and registration uncertainty, and shared engine 0.4.0.
+- Security: update `symfony/yaml`, `symfony/config` and `symfony/filesystem` to 7.4.23 (GHSA-hwfg-qwvh-2wfx, GHSA-5jff-8h8q-r5qx, GHSA-6prc-h956-hxjq) and require `symfony/yaml` `^7.4.23 || ^8.1.11`.
+- Engine 0.4.0 binaries are installed from the stable Architecture Graph v1.4.0 assets after checksum verification; update all engine-0.4.0 adapters together in a shared worker.
+
 ## 1.3.0-RC1 — pending project validation
 
 - Preserve sanitized compiled hook tags in optional container schema 3, retain schema 2 compatibility, and expose exact hook method targets plus registration uncertainty.

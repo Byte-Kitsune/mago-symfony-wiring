@@ -54,6 +54,6 @@ Neutral regressions cover typed delegation, first-class callable creation, defer
 
 Higher-order execution through `array_map` currently has an unknown query bound and remains `query-budget-incomplete`. This is not a proof of infinite tree recursion. First-class callable and arrow-function creation alone must not produce a `recursive-call` issue. The PHP reference evaluator follows the same distinction.
 
-## Engine 0.4.0 candidate
+## Engine 0.4.0
 
-This companion branch synchronizes the shared kernel with Doctrine Query Budget callback-effects improvements. Automatic download assets are reserved for Architecture Graph v1.4.0-RC1 and are not published by this draft. Build locally or select the matching CI binary through `MAGO_NATIVE_ENGINE`. All adapters in a shared worker must use engine 0.4.0.
+The shared kernel is synchronized with Doctrine Query Budget callback-effects improvements. Engine 0.4.0 binaries and SHA-256 checksums are downloaded from Architecture Graph v1.4.0 into a separate cache; `MAGO_NATIVE_ENGINE` remains an explicit override. All adapters in a shared worker must use engine 0.4.0.
